@@ -51,7 +51,7 @@ vi.mock('../../shared/node-bounded-file-reader', async (importOriginal) =>
   })
 )
 
-import { abortMerge, abortRebase, detectConflictOperation } from './status'
+import { abortMerge, abortRebase, detectConflictOperation, getStatus } from './status'
 
 describe('abortMerge', () => {
   beforeEach(() => {
@@ -110,5 +110,34 @@ describe('detectConflictOperation', () => {
     const result = await detectConflictOperation('/repo')
 
     expect(result).toBe('unknown')
+  })
+})
+
+describe('getStatus operationProgress', () => {
+  beforeEach(() => {
+    gitExecFileAsyncMock.mockReset()
+    gitStreamOptionsMock.mockReset()
+    readFileMock.mockReset()
+    statMock.mockReset()
+    existsSyncMock.mockReset()
+    gitExecFileAsyncMock.mockResolvedValue({ stdout: '' })
+  })
+
+  it('omits operationProgress when a sequencer operation has no rebase state on disk', async () => {
+    // Only `.git` itself resolves; every rebase-merge/rebase-apply read misses.
+    readFileMock.mockImplementation(async (target: string) =>
+      target.endsWith('.git')
+        ? 'gitdir: /repo/.git/worktrees/feature\n'
+        : Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }))
+    )
+    existsSyncMock.mockImplementation((target: string) => target.endsWith('CHERRY_PICK_HEAD'))
+
+    const result = await getStatus('/repo')
+
+    expect(result.conflictOperation).toBe('cherry-pick')
+    expect(result.operationProgress).toBeUndefined()
+    expect('operationProgress' in result).toBe(false)
+    // The reader ran and degraded — it did not skip the state directory.
+    expect(readFileMock).toHaveBeenCalledWith(expect.stringContaining('rebase-merge'), 'utf-8')
   })
 })

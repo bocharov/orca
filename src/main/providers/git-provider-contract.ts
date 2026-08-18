@@ -44,6 +44,9 @@ export type IGitProvider = {
   detectConflictOperation(worktreePath: string): Promise<GitConflictOperation>
   abortMerge(worktreePath: string): Promise<void>
   abortRebase(worktreePath: string): Promise<void>
+  continueMerge(worktreePath: string): Promise<void>
+  continueRebase(worktreePath: string): Promise<void>
+  continueCherryPick(worktreePath: string): Promise<void>
   checkoutBranch(worktreePath: string, branch: string): Promise<void>
   listLocalBranches(worktreePath: string): Promise<{ current: string | null; branches: string[] }>
   getBranchCompare(worktreePath: string, baseRef: string): Promise<GitBranchCompareResult>

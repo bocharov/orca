@@ -33,6 +33,7 @@ import {
   type GitLineStats
 } from '../../shared/git-uncommitted-line-stats'
 import { decodeGitCQuotedPath } from '../../shared/git-cquoted-path'
+import { readGitRebaseProgress } from '../../shared/git-rebase-progress'
 import {
   gitExecFileAsync,
   gitExecFileAsyncBuffer,
@@ -303,6 +304,14 @@ async function runGetStatus(
 
   // Why: detectConflictOperation and git status are independent, so run them concurrently to save I/O latency.
   const conflictPromise = detectConflictOperation(worktreePath)
+  // Why: only the sequencer operations have state on disk, so chain the read off the probe — a clean repo reads nothing.
+  const operationProgressPromise = conflictPromise
+    .then(async (operation) =>
+      operation === 'rebase' || operation === 'cherry-pick'
+        ? await readGitRebaseProgress(await resolveGitDir(worktreePath))
+        : undefined
+    )
+    .catch(() => undefined)
   // Why: core.quotePath=false keeps non-ASCII paths as raw UTF-8, not octal escapes, so entry.path is readable and lookups match.
   const statusArgs = [
     '-c',
@@ -431,11 +440,14 @@ async function runGetStatus(
     throw error
   }
 
+  const operationProgress = await operationProgressPromise
+
   return {
     entries,
     conflictOperation,
     head,
     branch,
+    ...(operationProgress ? { operationProgress } : {}),
     ...(options.includeIgnored ? { ignoredPaths: parser.ignoredPaths } : {}),
     ...(branchLineTotal ? { branchLineTotal } : {}),
     ...(didHitLimit ? { didHitLimit: true, statusLength: parser.statusLength } : {}),

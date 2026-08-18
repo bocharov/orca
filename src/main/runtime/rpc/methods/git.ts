@@ -88,6 +88,21 @@ export const GIT_METHODS: RpcMethod[] = [
     handler: async (params, { runtime }) => runtime.abortRuntimeGitRebase(params.worktree)
   }),
   defineMethod({
+    name: 'git.continueMerge',
+    params: WorktreeSelector,
+    handler: async (params, { runtime }) => runtime.continueRuntimeGitMerge(params.worktree)
+  }),
+  defineMethod({
+    name: 'git.continueRebase',
+    params: WorktreeSelector,
+    handler: async (params, { runtime }) => runtime.continueRuntimeGitRebase(params.worktree)
+  }),
+  defineMethod({
+    name: 'git.continueCherryPick',
+    params: WorktreeSelector,
+    handler: async (params, { runtime }) => runtime.continueRuntimeGitCherryPick(params.worktree)
+  }),
+  defineMethod({
     name: 'git.checkout',
     params: GitCheckout,
     handler: async (params, { runtime }) =>

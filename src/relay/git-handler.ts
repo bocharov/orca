@@ -76,6 +76,7 @@ import {
 } from '../shared/git-effective-upstream'
 import { loadGitHistoryFromExecutor } from '../shared/git-history'
 import { buildRelayGitEnv, buildRelayUnattendedGitEnv } from './relay-command-env'
+import { editorSuppressedGitEnv } from '../shared/git-sequencer-editor-env'
 import {
   removeSafeUntrackedDiscardTarget,
   removeSafeUntrackedDiscardTargets
@@ -271,6 +272,21 @@ export class GitHandler {
     this.dispatcher.onRequest('git.bulkUnstage', (p) => this.bulkUnstage(p))
     this.dispatcher.onRequest('git.abortMerge', (p) => this.abortMerge(p))
     this.dispatcher.onRequest('git.abortRebase', (p) => this.abortRebase(p))
+    this.dispatcher.onRequest('git.continueMerge', (p) =>
+      this.sequencerAction(p, ['merge', '--continue'])
+    )
+    this.dispatcher.onRequest('git.continueRebase', (p) =>
+      this.sequencerAction(p, ['rebase', '--continue'])
+    )
+    this.dispatcher.onRequest('git.continueCherryPick', (p) =>
+      this.sequencerAction(p, ['cherry-pick', '--continue'])
+    )
+    this.dispatcher.onRequest('git.skipRebase', (p) =>
+      this.sequencerAction(p, ['rebase', '--skip'])
+    )
+    this.dispatcher.onRequest('git.skipCherryPick', (p) =>
+      this.sequencerAction(p, ['cherry-pick', '--skip'])
+    )
     this.dispatcher.onRequest('git.checkout', (p) => this.checkout(p))
     this.dispatcher.onRequest('git.localBranches', (p) => this.localBranches(p))
     this.dispatcher.onRequest('git.discard', (p) => this.discard(p))
@@ -378,6 +394,7 @@ export class GitHandler {
       disableOptionalLocks?: boolean
       signal?: AbortSignal
       nonInteractive?: boolean
+      suppressEditor?: boolean
       stdin?: string
       timeout?: number
       terminationBarrier?: boolean
@@ -385,7 +402,9 @@ export class GitHandler {
   ): Promise<{ stdout: string; stderr: string }> {
     const expandedCwd = expandTilde(cwd)
     const run = async (): Promise<{ stdout: string; stderr: string }> => {
-      const env = opts?.nonInteractive ? buildRelayUnattendedGitEnv() : buildRelayGitEnv()
+      const baseEnv = opts?.nonInteractive ? buildRelayUnattendedGitEnv() : buildRelayGitEnv()
+      // Why: the host can carry an ambient GIT_EDITOR, and `--continue` would then hang on it forever.
+      const env = opts?.suppressEditor ? editorSuppressedGitEnv(baseEnv) : baseEnv
       if (opts?.disableOptionalLocks) {
         env.GIT_OPTIONAL_LOCKS = '0'
       }
@@ -652,6 +671,18 @@ export class GitHandler {
     const worktreePath = params.worktreePath as string
     try {
       await this.git(['rebase', '--abort'], worktreePath)
+    } finally {
+      this.clearGitMutationReadCaches()
+    }
+  }
+
+  // Why: every subcommand here predates the Git 2.25 baseline (`merge --continue` 2.12,
+  // `cherry-pick --skip` 2.22), so no capability probe or fallback is needed.
+  private async sequencerAction(params: Record<string, unknown>, args: string[]) {
+    this.clearGitMutationReadCaches()
+    const worktreePath = params.worktreePath as string
+    try {
+      await this.git(args, worktreePath, { suppressEditor: true })
     } finally {
       this.clearGitMutationReadCaches()
     }

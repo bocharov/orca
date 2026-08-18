@@ -59,6 +59,7 @@ import {
   getCommitCompare,
   getCommitDiff
 } from '../git/status'
+import { continueCherryPick, continueMerge, continueRebase } from '../git/sequencer-actions'
 import { getHistory } from '../git/history'
 import {
   cancelGenerateCommitMessageLocal,
@@ -1391,6 +1392,66 @@ export function registerFilesystemHandlers(
         worktreePath
       )
       await abortRebase(worktreePath, gitOptions)
+    }
+  )
+
+  ipcMain.handle(
+    'git:continueMerge',
+    async (_event, args: { worktreePath: string; connectionId?: string }): Promise<void> => {
+      if (args.connectionId) {
+        const provider = getSshGitProvider(args.connectionId)
+        if (!provider) {
+          throw new Error(`No git provider for connection "${args.connectionId}"`)
+        }
+        return provider.continueMerge(args.worktreePath)
+      }
+      const worktreePath = await resolveRegisteredWorktreePath(args.worktreePath, store)
+      const gitOptions = getLocalGitOptionsForRegisteredWorktree(
+        store,
+        args.worktreePath,
+        worktreePath
+      )
+      await continueMerge(worktreePath, gitOptions)
+    }
+  )
+
+  ipcMain.handle(
+    'git:continueRebase',
+    async (_event, args: { worktreePath: string; connectionId?: string }): Promise<void> => {
+      if (args.connectionId) {
+        const provider = getSshGitProvider(args.connectionId)
+        if (!provider) {
+          throw new Error(`No git provider for connection "${args.connectionId}"`)
+        }
+        return provider.continueRebase(args.worktreePath)
+      }
+      const worktreePath = await resolveRegisteredWorktreePath(args.worktreePath, store)
+      const gitOptions = getLocalGitOptionsForRegisteredWorktree(
+        store,
+        args.worktreePath,
+        worktreePath
+      )
+      await continueRebase(worktreePath, gitOptions)
+    }
+  )
+
+  ipcMain.handle(
+    'git:continueCherryPick',
+    async (_event, args: { worktreePath: string; connectionId?: string }): Promise<void> => {
+      if (args.connectionId) {
+        const provider = getSshGitProvider(args.connectionId)
+        if (!provider) {
+          throw new Error(`No git provider for connection "${args.connectionId}"`)
+        }
+        return provider.continueCherryPick(args.worktreePath)
+      }
+      const worktreePath = await resolveRegisteredWorktreePath(args.worktreePath, store)
+      const gitOptions = getLocalGitOptionsForRegisteredWorktree(
+        store,
+        args.worktreePath,
+        worktreePath
+      )
+      await continueCherryPick(worktreePath, gitOptions)
     }
   )
 

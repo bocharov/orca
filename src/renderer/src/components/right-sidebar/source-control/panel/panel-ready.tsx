@@ -19,6 +19,7 @@ export function SourceControlPanelReady(props: SourceControlPanelReadyProps) {
     compareBaseRef,
     deleteDiffComment,
     diffCommentCount,
+    conflictOperation,
     diffCommentsCopied,
     diffCommentsExpanded,
     diffCommentsForActive,
@@ -85,6 +86,7 @@ export function SourceControlPanelReady(props: SourceControlPanelReadyProps) {
           compareBaseRef={compareBaseRef}
           headDisplay={gitIdentityDisplay}
           upstreamStatus={remoteStatus}
+          conflictOperation={conflictOperation}
           manualReviewUrl={manualReviewUrl}
         />
 

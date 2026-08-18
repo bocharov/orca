@@ -171,3 +171,47 @@ describe('source-control branch context stats', () => {
     ).toEqual([])
   })
 })
+
+describe('ahead/behind while an operation is in progress', () => {
+  const upstreamStatus = {
+    hasUpstream: true,
+    upstreamName: 'refs/remotes/origin/main',
+    ahead: 1,
+    behind: 2
+  }
+
+  it('shows the counters normally when nothing is running', () => {
+    const stats = buildSourceControlBranchContextStats({
+      summary: readySummary,
+      baseRef: 'origin/main',
+      upstreamStatus,
+      operationInProgress: false
+    })
+
+    // Compare-ahead (↑3 vs origin/main) is a different count from upstream-ahead, so both show.
+    expect(stats.map((stat) => stat.label)).toEqual(['↑1', '↓2', '↑3'])
+  })
+
+  // Mid-rebase HEAD is a transient replay commit, so every count is against a tree
+  // the user never asked about.
+  it('suppresses every counter while an operation is in progress', () => {
+    expect(
+      buildSourceControlBranchContextStats({
+        summary: readySummary,
+        baseRef: 'origin/main',
+        upstreamStatus,
+        operationInProgress: true
+      })
+    ).toEqual([])
+  })
+
+  it('defaults to showing counters when the caller does not pass the flag', () => {
+    expect(
+      buildSourceControlBranchContextStats({
+        summary: readySummary,
+        baseRef: 'origin/main',
+        upstreamStatus
+      }).length
+    ).toBeGreaterThan(0)
+  })
+})

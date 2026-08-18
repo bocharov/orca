@@ -10447,6 +10447,12 @@ export class OrcaRuntimeService {
     this.gitCommands.abortRuntimeGitMerge.bind(this.gitCommands)
   abortRuntimeGitRebase: RuntimeGitCommands['abortRuntimeGitRebase'] =
     this.gitCommands.abortRuntimeGitRebase.bind(this.gitCommands)
+  continueRuntimeGitMerge: RuntimeGitCommands['continueRuntimeGitMerge'] =
+    this.gitCommands.continueRuntimeGitMerge.bind(this.gitCommands)
+  continueRuntimeGitRebase: RuntimeGitCommands['continueRuntimeGitRebase'] =
+    this.gitCommands.continueRuntimeGitRebase.bind(this.gitCommands)
+  continueRuntimeGitCherryPick: RuntimeGitCommands['continueRuntimeGitCherryPick'] =
+    this.gitCommands.continueRuntimeGitCherryPick.bind(this.gitCommands)
   checkoutRuntimeGitBranch: RuntimeGitCommands['checkoutRuntimeGitBranch'] =
     this.gitCommands.checkoutRuntimeGitBranch.bind(this.gitCommands)
   listRuntimeGitLocalBranches: RuntimeGitCommands['listRuntimeGitLocalBranches'] =

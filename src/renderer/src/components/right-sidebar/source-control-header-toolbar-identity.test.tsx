@@ -3,7 +3,11 @@ import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { SourceControlHeaderToolbar } from './source-control/panel/header-toolbar'
 import type { GitBranchCompareSummary } from '../../../../shared/git-diff-compare-types'
-import type { GitBranchLineTotal } from '../../../../shared/git-status-types'
+import type {
+  GitBranchLineTotal,
+  GitConflictOperation,
+  GitUpstreamStatus
+} from '../../../../shared/git-status-types'
 import type { WorktreeGitIdentityDisplay } from '@/lib/worktree-git-identity-display'
 import type { PrimaryAction } from './source-control-primary-action'
 
@@ -40,6 +44,8 @@ function renderToolbar(options?: {
   branchSummary?: GitBranchCompareSummary | null
   compareBaseRef?: string | null
   branchLineTotal?: GitBranchLineTotal | null
+  conflictOperation?: GitConflictOperation
+  upstreamStatus?: GitUpstreamStatus
 }): string {
   return renderToStaticMarkup(
     <SourceControlHeaderToolbar
@@ -69,6 +75,8 @@ function renderToolbar(options?: {
           : options.headDisplay
       }
       branchLineTotal={options?.branchLineTotal}
+      conflictOperation={options?.conflictOperation}
+      upstreamStatus={options?.upstreamStatus}
     />
   )
 }
@@ -140,5 +148,57 @@ describe('SourceControlHeaderToolbar branch identity', () => {
   it('renders exactly as before when no branch line total is supplied', () => {
     expect(renderToolbar({ branchLineTotal: undefined })).toBe(renderToolbar())
     expect(renderToolbar()).not.toContain('data-testid="source-control-branch-line-total"')
+  })
+})
+
+describe('SourceControlHeaderToolbar identity during a rebase', () => {
+  const rebasingHead = {
+    kind: 'operation',
+    operation: 'rebase',
+    branchName: 'triage-e2e',
+    shortHead: '285883d',
+    head: '285883d1c0ffee00'
+  } as const
+
+  const upstreamStatus: GitUpstreamStatus = {
+    hasUpstream: true,
+    upstreamName: 'refs/remotes/origin/main',
+    ahead: 1,
+    behind: 0
+  }
+
+  it('names the rebasing branch instead of "Detached HEAD · <sha>"', () => {
+    const markup = renderToolbar({ headDisplay: rebasingHead, conflictOperation: 'rebase' })
+
+    expect(markup).toContain('triage-e2e')
+    expect(markup).toContain('rebasing')
+    expect(markup).not.toContain('Detached HEAD')
+    expect(markup).toContain('data-operation="rebase"')
+    expect(markup).toContain('aria-label="Current branch: triage-e2e (rebasing)"')
+  })
+
+  it('keeps the raw SHA reachable in the tooltip', () => {
+    const markup = renderToolbar({ headDisplay: rebasingHead, conflictOperation: 'rebase' })
+
+    expect(markup).toContain('285883d1c0ffee00')
+  })
+
+  it('suppresses the ahead/behind counter while the rebase runs', () => {
+    const running = renderToolbar({
+      headDisplay: rebasingHead,
+      conflictOperation: 'rebase',
+      upstreamStatus
+    })
+    const settled = renderToolbar({
+      headDisplay: { kind: 'branch', branchName: 'triage-e2e' },
+      conflictOperation: 'unknown',
+      upstreamStatus
+    })
+
+    expect(settled).toContain('↑1')
+    expect(running).not.toContain('↑1')
+    // The base ref itself still shows — only the counts measured against a transient
+    // mid-rebase commit go away.
+    expect(running).toContain('origin/main')
   })
 })

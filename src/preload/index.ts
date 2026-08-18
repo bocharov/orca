@@ -3525,6 +3525,12 @@ const api = {
       ipcRenderer.invoke('git:abortMerge', args),
     abortRebase: (args: { worktreePath: string; connectionId?: string }): Promise<void> =>
       ipcRenderer.invoke('git:abortRebase', args),
+    continueMerge: (args: { worktreePath: string; connectionId?: string }): Promise<void> =>
+      ipcRenderer.invoke('git:continueMerge', args),
+    continueRebase: (args: { worktreePath: string; connectionId?: string }): Promise<void> =>
+      ipcRenderer.invoke('git:continueRebase', args),
+    continueCherryPick: (args: { worktreePath: string; connectionId?: string }): Promise<void> =>
+      ipcRenderer.invoke('git:continueCherryPick', args),
     diff: (args: {
       worktreePath: string
       filePath: string

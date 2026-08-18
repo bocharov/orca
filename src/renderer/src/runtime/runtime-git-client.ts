@@ -352,6 +352,57 @@ export async function abortRuntimeGitRebase(context: RuntimeGitContext): Promise
   )
 }
 
+export async function continueRuntimeGitMerge(context: RuntimeGitContext): Promise<void> {
+  const target = getActiveRuntimeTarget(context.settings)
+  if (target.kind === 'local' || !context.worktreeId) {
+    await window.api.git.continueMerge({
+      worktreePath: resolveLocalWorktreePath(context),
+      connectionId: context.connectionId
+    })
+    return
+  }
+  await callRuntimeRpc(
+    target,
+    'git.continueMerge',
+    { worktree: toRuntimeWorktreeSelector(context.worktreeId) },
+    { timeoutMs: 30_000 }
+  )
+}
+
+export async function continueRuntimeGitRebase(context: RuntimeGitContext): Promise<void> {
+  const target = getActiveRuntimeTarget(context.settings)
+  if (target.kind === 'local' || !context.worktreeId) {
+    await window.api.git.continueRebase({
+      worktreePath: resolveLocalWorktreePath(context),
+      connectionId: context.connectionId
+    })
+    return
+  }
+  await callRuntimeRpc(
+    target,
+    'git.continueRebase',
+    { worktree: toRuntimeWorktreeSelector(context.worktreeId) },
+    { timeoutMs: 30_000 }
+  )
+}
+
+export async function continueRuntimeGitCherryPick(context: RuntimeGitContext): Promise<void> {
+  const target = getActiveRuntimeTarget(context.settings)
+  if (target.kind === 'local' || !context.worktreeId) {
+    await window.api.git.continueCherryPick({
+      worktreePath: resolveLocalWorktreePath(context),
+      connectionId: context.connectionId
+    })
+    return
+  }
+  await callRuntimeRpc(
+    target,
+    'git.continueCherryPick',
+    { worktree: toRuntimeWorktreeSelector(context.worktreeId) },
+    { timeoutMs: 30_000 }
+  )
+}
+
 export async function getRuntimeGitDiff(
   context: RuntimeGitContext,
   args: { filePath: string; staged: boolean; compareAgainstHead?: boolean }

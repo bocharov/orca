@@ -488,6 +488,24 @@ export class SshGitProvider implements IGitProvider {
     })
   }
 
+  async continueMerge(worktreePath: string): Promise<void> {
+    await this.runWithGitReadInvalidation(async () => {
+      await this.mux.request('git.continueMerge', { worktreePath })
+    })
+  }
+
+  async continueRebase(worktreePath: string): Promise<void> {
+    await this.runWithGitReadInvalidation(async () => {
+      await this.mux.request('git.continueRebase', { worktreePath })
+    })
+  }
+
+  async continueCherryPick(worktreePath: string): Promise<void> {
+    await this.runWithGitReadInvalidation(async () => {
+      await this.mux.request('git.continueCherryPick', { worktreePath })
+    })
+  }
+
   async checkoutBranch(worktreePath: string, branch: string): Promise<void> {
     await this.runWithGitReadInvalidation(async () => {
       await this.mux.request('git.checkout', { worktreePath, branch })

@@ -94,13 +94,20 @@ function resolveUpstreamDisplayLabel(upstreamStatus: GitUpstreamStatus): string 
 export function buildSourceControlBranchContextStats({
   summary,
   baseRef,
-  upstreamStatus
+  upstreamStatus,
+  operationInProgress = false
 }: {
   summary: GitBranchCompareSummary
   baseRef: string
   upstreamStatus?: GitUpstreamStatus
+  operationInProgress?: boolean
 }): SourceControlBranchContextStat[] {
   if (summary.status !== 'ready') {
+    return []
+  }
+  // Why: mid-rebase HEAD is a transient replay commit, so every count here is
+  // measured against a tree the user never asked about. No number beats a wrong one.
+  if (operationInProgress) {
     return []
   }
 
