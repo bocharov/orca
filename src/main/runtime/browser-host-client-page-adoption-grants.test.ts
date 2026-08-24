@@ -34,7 +34,7 @@ const serverPlacement: RuntimeBrowserPlacement = { kind: 'server' }
 
 function harness(options: {
   placements: Record<string, RuntimeBrowserPlacement | undefined>
-  reconcile?: () => Promise<unknown>
+  adopt?: () => Promise<unknown>
   existingGrants?: Map<string, BrowserClientPageExecutionHostGrant>
 }) {
   const releases: { executionHostKey: string; release: ReturnType<typeof vi.fn> }[] = []
@@ -43,7 +43,7 @@ function harness(options: {
     releases.push({ executionHostKey, release })
     return { release }
   })
-  const reconcile = vi.fn(options.reconcile ?? (() => Promise.resolve(undefined)))
+  const adopt = vi.fn(options.adopt ?? (() => Promise.resolve(undefined)))
   const getPlacement = vi.fn((browserPageId: string) => options.placements[browserPageId])
   const executionHostGrants =
     options.existingGrants ?? new Map<string, BrowserClientPageExecutionHostGrant>()
@@ -51,13 +51,13 @@ function harness(options: {
 
   return {
     retain,
-    reconcile,
+    adopt,
     getPlacement,
     executionHostGrants,
     releases,
     dependencies: {
       state,
-      reconciliations: { reconcile },
+      reconciliations: { adopt },
       placements: { getPlacement },
       executionHostGrants
     }
@@ -140,7 +140,7 @@ describe('adoptBrowserHostClientPages', () => {
     const unplaced = intent({ browserPageId: 'page-unplaced', pageHostGeneration: 12 })
     const fake = harness({
       placements: { 'page-placed': clientPlacement(11), 'page-unplaced': undefined },
-      reconcile: () => Promise.reject(new Error('browser_host_reconcile_failed'))
+      adopt: () => Promise.reject(new Error('browser_host_reconcile_failed'))
     })
 
     // A partial reclaim must keep the pages it managed to place; releasing their grants would
@@ -159,7 +159,7 @@ describe('adoptBrowserHostClientPages', () => {
 
     expect(adopted).toEqual([])
     expect(fake.retain).not.toHaveBeenCalled()
-    expect(fake.reconcile).not.toHaveBeenCalled()
+    expect(fake.adopt).not.toHaveBeenCalled()
   })
 
   it('retains exactly one grant per intent under that intent execution host key', async () => {

@@ -46,6 +46,12 @@ export async function recoverUnavailableRuntimeBrowserClientPages(options: {
   notifyWorkspace(workspaceId: string): void
   /** Drops a page whose placement recovery destroyed without replacing it. */
   releaseUnrecoverablePage?: (page: RuntimeBrowserClientPage) => void
+  /**
+   * Pages an adoption pass just rebuilt from this same inventory. Their entries still describe the
+   * predecessor runtime's authority by construction, so every inventory comparison below would call
+   * them unhealthy and re-tear-down what adoption just settled.
+   */
+  adoptedPageIds?: ReadonlySet<string>
   signal?: AbortSignal
 }): Promise<void> {
   const inventory = options.lease.pageInventory
@@ -59,6 +65,7 @@ export async function recoverUnavailableRuntimeBrowserClientPages(options: {
   const inventoryByPageId = new Map(inventory.map((page) => [page.browserPageId, page]))
   const pages = options.pages.listPages().filter(
     (page) =>
+      !options.adoptedPageIds?.has(page.browserPageId) &&
       page.placement.browserHostClientId === options.lease.browserHostClientId &&
       // Why: a page retained across a host quit still names the generation that placed it, so
       // recovery has to reach back past this lease's own generation to pick it up again.

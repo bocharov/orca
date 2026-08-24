@@ -61,10 +61,11 @@ export type ClientHostedPageAdoptionLease = {
  * Turns adoptable entries into restore intents under this runtime's authority.
  *
  * Deliberately no `reclaimFrom`: reclaim rekeys a live guest onto a new authority, but it requires
- * the execution-host key to be unchanged, and `native`/`wsl` keys name the runtime that minted them
- * (`browserNetworkExecutionHostKey`). A restart therefore invalidates the page's network route no
- * matter what, so the plan must close the orphaned guest and restore the tab at its last URL. The
- * tab survives; the DOM behind it cannot.
+ * the execution-host key to be unchanged, and no kind of key survives a restart
+ * (`browserNetworkExecutionHostKey`). `native`/`wsl` keys name the runtime that minted them; an SSH
+ * key names the target instead, but carries the provider epoch, which is freshly random per process.
+ * The plan must therefore close the orphaned guest and restore the tab at its last URL. The tab
+ * survives; the DOM behind it cannot.
  *
  * Generations are handed out above every generation the inventory reports, because the placement
  * registry refuses a generation below one it has already issued.
@@ -113,7 +114,7 @@ type ReconciliationOptions = {
 export type BrowserHostClientPageAdoptionDependencies = {
   state: BrowserHostLeaseState
   reconciliations: {
-    reconcile(
+    adopt(
       state: BrowserHostLeaseState,
       intents: readonly BrowserHostRuntimePageIntent[],
       options: ReconciliationOptions
@@ -144,7 +145,7 @@ export async function adoptBrowserHostClientPages(
     grant: dependencies.state.executionHostGrants.retain(intent.executionHostKey)
   }))
   await dependencies.reconciliations
-    .reconcile(dependencies.state, intents, options)
+    .adopt(dependencies.state, intents, options)
     .catch(() => undefined)
   const adopted: string[] = []
   for (const { intent, grant } of grants) {

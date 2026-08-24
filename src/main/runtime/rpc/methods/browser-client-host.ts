@@ -107,7 +107,7 @@ export const BROWSER_CLIENT_HOST_METHODS: RpcAnyMethod[] = [
         }
         // Before recovery, which only reconciles pages this runtime already knows: a restart left
         // the guests alive on the client but took the records with it.
-        await adoptRuntimeBrowserClientPagesFromInventory({
+        const adoption = await adoptRuntimeBrowserClientPagesFromInventory({
           lease: handle.lease,
           authority: registry,
           pages: getRuntimeBrowserPageRegistry(runtime),
@@ -116,9 +116,13 @@ export const BROWSER_CLIENT_HOST_METHODS: RpcAnyMethod[] = [
             runtime.resolveBrowserExecutionHostKeyForWorkspace(workspaceId),
           ...(signal ? { signal } : {})
         })
-        // A host has now reported what it holds, so snapshots stop warning that client-hosted pages
-        // are unaccounted for -- whether or not any page turned out to be adoptable.
-        runtime.markClientHostedPagesReconciled()
+        if (adoption.unadoptedPageIds.length === 0) {
+          // This client's host has reported what it holds and the runtime has taken all of it back,
+          // so snapshots stop warning that its client-hosted pages are unaccounted for. A page left
+          // behind means the opposite -- its guest is live and record-less -- so the hold stands
+          // until a later attach settles it or the window's deadline expires.
+          runtime.markClientHostedPagesReconciled(pairedDeviceId)
+        }
         await recoverUnavailableRuntimeBrowserClientPages({
           lease: handle.lease,
           authority: registry,
@@ -126,6 +130,7 @@ export const BROWSER_CLIENT_HOST_METHODS: RpcAnyMethod[] = [
           notifyWorkspace: (workspaceId) => runtime.notifyMobileSessionTabsChanged(workspaceId),
           releaseUnrecoverablePage: (page) =>
             releaseRuntimeBrowserClientPageRecord(runtime, page.browserPageId, page.placement),
+          adoptedPageIds: new Set(adoption.adoptedPageIds),
           ...(signal ? { signal } : {})
         })
         const reason = await Promise.race([

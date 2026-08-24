@@ -3,7 +3,8 @@ import type { BrowserHostLease } from './browser-host-lease-records'
 import type { BrowserHostLeaseRegistry } from './browser-host-lease-registry'
 import {
   buildClientPageAdoptionIntents,
-  selectAdoptableClientHostedPages
+  selectAdoptableClientHostedPages,
+  type AdoptableClientHostedPage
 } from './browser-host-client-page-adoption'
 import type { RuntimeBrowserPageRegistry } from './runtime-browser-page-registry'
 
@@ -12,18 +13,43 @@ type AdoptionAuthority = Pick<
   'authorityRuntimeId' | 'authorityEpoch' | 'adoptClientPages' | 'getPlacement'
 >
 
+/**
+ * Where a workspace's client-hosted pages would be routed now.
+ *
+ * `unavailable` is deliberately not `workspace-gone`: the workspace is still real and its pages are
+ * still live, the route just cannot be minted yet. Only `workspace-gone` is evidence a page has
+ * nothing left to be restored into.
+ */
+export type BrowserExecutionHostKeyResolution =
+  | { status: 'resolved'; executionHostKey: string }
+  | { status: 'workspace-gone' }
+  | { status: 'unavailable' }
+
 export type RuntimeBrowserClientPageAdoptionOptions = {
   lease: BrowserHostLease
   authority: AdoptionAuthority
   pages: RuntimeBrowserPageRegistry
   notifyWorkspace: (workspaceId: string) => void
-  /**
-   * The execution-host key that workspace's pages would be created under now. Undefined for a
-   * workspace this runtime can no longer resolve, which drops its pages from adoption entirely.
-   */
-  resolveExecutionHostKey: (workspaceId: string) => Promise<string | undefined>
+  /** The execution-host key that workspace's pages would be created under now. */
+  resolveExecutionHostKey: (workspaceId: string) => Promise<BrowserExecutionHostKeyResolution>
   signal?: AbortSignal
 }
+
+export type RuntimeBrowserClientPageAdoptionResult = {
+  /** Pages this runtime took back and republished, in inventory order. */
+  adoptedPageIds: readonly string[]
+  /**
+   * Adoptable pages this attach did not take back -- a workspace whose route is not up yet, a
+   * reconciliation that failed part way. Their guests are still live on the client, so the caller
+   * must keep holding their rows rather than declaring this client reconciled.
+   */
+  unadoptedPageIds: readonly string[]
+}
+
+const NOTHING_TO_ADOPT: RuntimeBrowserClientPageAdoptionResult = Object.freeze({
+  adoptedPageIds: Object.freeze([]),
+  unadoptedPageIds: Object.freeze([])
+})
 
 /**
  * Rebuilds this runtime's client-hosted page records from the inventory an attaching host reports.
@@ -34,7 +60,7 @@ export type RuntimeBrowserClientPageAdoptionOptions = {
  */
 export async function adoptRuntimeBrowserClientPagesFromInventory(
   options: RuntimeBrowserClientPageAdoptionOptions
-): Promise<readonly string[]> {
+): Promise<RuntimeBrowserClientPageAdoptionResult> {
   const inventory = options.lease.pageInventory
   if (
     options.lease.pageReconciliationProtocolVersion !== 1 ||
@@ -42,7 +68,7 @@ export async function adoptRuntimeBrowserClientPagesFromInventory(
     options.lease.pageCommandProtocolVersion !== 1 ||
     !inventory
   ) {
-    return []
+    return NOTHING_TO_ADOPT
   }
   const adoptable = selectAdoptableClientHostedPages({
     inventory,
@@ -51,15 +77,24 @@ export async function adoptRuntimeBrowserClientPagesFromInventory(
     hasRuntimePage: (browserPageId) => options.pages.getPage(browserPageId) !== undefined
   })
   if (adoptable.length === 0) {
-    return []
+    return NOTHING_TO_ADOPT
   }
   const executionHostKeyByWorkspaceId = new Map<string, string>()
+  const goneWorkspaceIds = new Set<string>()
   for (const workspaceId of new Set(adoptable.map((page) => page.workspaceId))) {
-    const executionHostKey = await options.resolveExecutionHostKey(workspaceId)
-    if (executionHostKey !== undefined) {
-      executionHostKeyByWorkspaceId.set(workspaceId, executionHostKey)
+    const resolved = await options.resolveExecutionHostKey(workspaceId)
+    if (resolved.status === 'resolved') {
+      executionHostKeyByWorkspaceId.set(workspaceId, resolved.executionHostKey)
+    } else if (resolved.status === 'workspace-gone') {
+      goneWorkspaceIds.add(workspaceId)
     }
   }
+  // A page whose workspace is gone is settled, not pending: nothing will ever restore it, so it must
+  // not hold this client's rows open. Anything else unadopted is a "not yet".
+  const settle = (pages: readonly AdoptableClientHostedPage[]): readonly string[] =>
+    pages
+      .filter((page) => !goneWorkspaceIds.has(page.workspaceId))
+      .map((page) => page.browserPageId)
   const intents = buildClientPageAdoptionIntents({
     pages: adoptable,
     authority: {
@@ -73,7 +108,7 @@ export async function adoptRuntimeBrowserClientPagesFromInventory(
     executionHostKeyByWorkspaceId
   })
   if (intents.length === 0) {
-    return []
+    return { adoptedPageIds: [], unadoptedPageIds: settle(adoptable) }
   }
   const intentsByPageId = new Map(intents.map((intent) => [intent.browserPageId, intent]))
   const adoptedPageIds = new Set(
@@ -90,6 +125,7 @@ export async function adoptRuntimeBrowserClientPagesFromInventory(
   )
   const byPageId = new Map(adoptable.map((page) => [page.browserPageId, page]))
   const publishedWorkspaces = new Set<string>()
+  const publishedPageIds: string[] = []
   for (const browserPageId of adoptedPageIds) {
     const page = byPageId.get(browserPageId)
     const intent = intentsByPageId.get(browserPageId)
@@ -112,6 +148,7 @@ export async function adoptRuntimeBrowserClientPagesFromInventory(
         active: false
       })
       publishedWorkspaces.add(page.workspaceId)
+      publishedPageIds.push(browserPageId)
     } catch (error) {
       console.warn('[browser-host-lease] client page adoption publish failed:', {
         browserPageId,
@@ -122,7 +159,11 @@ export async function adoptRuntimeBrowserClientPagesFromInventory(
   for (const workspaceId of publishedWorkspaces) {
     options.notifyWorkspace(workspaceId)
   }
-  return [...publishedWorkspaces]
+  const published = new Set(publishedPageIds)
+  return {
+    adoptedPageIds: publishedPageIds,
+    unadoptedPageIds: settle(adoptable.filter((page) => !published.has(page.browserPageId)))
+  }
 }
 
 function adoptedPageUrl(page: BrowserClientHostedPageInventory): string {
