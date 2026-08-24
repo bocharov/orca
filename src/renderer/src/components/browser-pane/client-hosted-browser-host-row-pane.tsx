@@ -37,7 +37,7 @@ export function ClientHostedBrowserHostRowPane({
               )
             : translate(
                 'browser.clientHosted.hostPaneDescription',
-                'This page renders on the paired desktop that opened it, so there is nothing to display here.'
+                'This page renders on the paired desktop that opened it.'
               )}
         </div>
         <div className="max-w-full truncate text-xs text-muted-foreground/80" title={row.url}>
