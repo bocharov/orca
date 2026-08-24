@@ -29,6 +29,7 @@ import { useWebviewGuestFocus } from './assemble-chrome/browser-page-guest-focus
 import { RemoteRuntimeEgressIndicator } from './assemble-chrome/browser-egress-indicator'
 import { getBrowserPageZoomIndicatorState } from './host-guest/browser-page-zoom'
 import { useBrowserPageWebviewShortcuts } from './host-guest/use-browser-page-webview-shortcuts'
+import { useClientHostedGuestActivationFocus } from './host-guest/use-client-hosted-guest-activation-focus'
 import { useBrowserPageZoomFeedback } from './host-guest/use-browser-page-zoom-feedback'
 import { BrowserLoadFailureOverlay } from './navigate/browser-load-failure-overlay'
 import { resolveBrowserAddressBarSubmission } from './navigate/browser-address-bar-navigation'
@@ -321,12 +322,7 @@ export function ClientHostedBrowserPagePane({
     setAddressBarValueFromPage
   ])
 
-  useEffect(() => {
-    // Why: a new blank tab is claiming the address bar; focusing the guest here would yank it straight back.
-    if (isActive && !keepAddressBarFocusRef.current) {
-      webviewRef.current?.focus()
-    }
-  }, [isActive, keepAddressBarFocusRef])
+  useClientHostedGuestActivationFocus({ isActive, webviewRef, keepAddressBarFocusRef })
 
   const showFailureOverlay = !attachmentError && Boolean(browserTab.loadError)
   // Why: the failure is about the URL that failed, not whatever page is still loaded — feeding
