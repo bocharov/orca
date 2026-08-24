@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { StrictMode, type ReactNode } from 'react'
 import { act, cleanup, render } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BrowserPage } from '../../../../shared/browser-workspace-types'
@@ -68,8 +69,12 @@ function createGuest(): { webview: Electron.WebviewTag; focus: ReturnType<typeof
   return { webview, focus }
 }
 
+/** Set per describe half: the renderer itself runs under StrictMode, so the focus latch has to
+ *  survive an effect being destroyed and recreated on a pane that never went anywhere. */
+let wrap: (tree: ReactNode) => React.JSX.Element = (tree) => <>{tree}</>
+
 function paneElement(isActive: boolean): React.JSX.Element {
-  return (
+  return wrap(
     <TooltipProvider>
       <ClientHostedBrowserPagePane
         browserTab={page()}
@@ -98,8 +103,12 @@ function startDrag(): () => void {
   return () => act(() => release())
 }
 
-describe('client-hosted guest focus during a tab drag', () => {
+describe.each([
+  ['plain', (tree: ReactNode) => <>{tree}</>],
+  ['StrictMode', (tree: ReactNode) => <StrictMode>{tree}</StrictMode>]
+])('client-hosted guest focus during a tab drag (%s)', (_half, wrapHalf) => {
   beforeEach(() => {
+    wrap = wrapHalf
     mocks.attach.mockReset()
     installClientHostedPaneApi()
   })
@@ -154,5 +163,33 @@ describe('client-hosted guest focus during a tab drag', () => {
     endDrag()
 
     expect(focus).not.toHaveBeenCalled()
+  })
+
+  // Why this matters: the gate makes the focus effect reactive, so a drag anywhere in the window —
+  // a terminal pane reorder, a drag of some other tab — re-runs it on a tab that was already active.
+  // Focusing the guest there takes focus off an address bar the user is typing in, and the URL-follow
+  // guard only holds the draft while the bar still owns focus.
+  it('leaves an already-active guest alone when an unrelated drag ends', () => {
+    const { focus } = createGuest()
+    render(paneElement(true))
+    focus.mockClear()
+
+    const endDrag = startDrag()
+    endDrag()
+
+    expect(focus).not.toHaveBeenCalled()
+  })
+
+  it('focuses the guest again when the tab is reactivated after such a drag', () => {
+    const { focus } = createGuest()
+    const view = render(paneElement(true))
+    const endDrag = startDrag()
+    endDrag()
+    focus.mockClear()
+
+    view.rerender(paneElement(false))
+    view.rerender(paneElement(true))
+
+    expect(focus).toHaveBeenCalledTimes(1)
   })
 })

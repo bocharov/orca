@@ -323,14 +323,30 @@ export function ClientHostedBrowserPagePane({
     setAddressBarValueFromPage
   ])
 
+  const guestFocusedForActivationRef = useRef(false)
   useEffect(() => {
-    // Why: a new blank tab is claiming the address bar; focusing the guest here would yank it straight back.
-    // Why the drag gate: a tab drag preview-activates whatever it hovers, and focusing the guest hands
-    // focus to another WebContents — the embedder blur that follows reads as an aborted drag. The flag
-    // is reactive, so the guest still gets focus once the drag that raised it ends.
-    if (isActive && !dragPassthroughActive && !keepAddressBarFocusRef.current) {
-      webviewRef.current?.focus()
+    if (!isActive) {
+      guestFocusedForActivationRef.current = false
+      return
     }
+    // Why once per activation and not once per effect run: the drag gate below makes this effect
+    // reactive, so without the latch every drag that ends anywhere in the window would pull focus
+    // out of the address bar of an already-active tab and discard the draft being typed there.
+    if (guestFocusedForActivationRef.current) {
+      return
+    }
+    // Why the drag gate: a tab drag preview-activates whatever it hovers, and focusing the guest hands
+    // focus to another WebContents — the embedder blur that follows reads as an aborted drag. Only this
+    // gate leaves the latch down, so a suppressed activation gets its focus once the drag ends.
+    if (dragPassthroughActive) {
+      return
+    }
+    guestFocusedForActivationRef.current = true
+    // Why: a new blank tab is claiming the address bar; focusing the guest here would yank it straight back.
+    if (keepAddressBarFocusRef.current) {
+      return
+    }
+    webviewRef.current?.focus()
   }, [dragPassthroughActive, isActive, keepAddressBarFocusRef])
 
   const showFailureOverlay = !attachmentError && Boolean(browserTab.loadError)
