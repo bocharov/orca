@@ -74,6 +74,8 @@ type PairedRuntimeBrowserClientHostCompositionOptions<
   onError?: (error: Error) => void
   /** Runs as closing begins, before teardown: the point after which this composition owns nothing. */
   onClosing?: () => void
+  /** Injected so the grace a restart depends on is drivable; production supplies the real deadline. */
+  createAuthorityReplacementWait?: () => BrowserClientHostAuthorityReplacementWait
 }
 
 export class PairedRuntimeBrowserClientHostComposition<
@@ -92,7 +94,8 @@ export class PairedRuntimeBrowserClientHostComposition<
   private readonly authorityReplacementWait: BrowserClientHostAuthorityReplacementWait
 
   constructor(private readonly options: PairedRuntimeBrowserClientHostCompositionOptions<Start>) {
-    this.authorityReplacementWait = new BrowserClientHostAuthorityReplacementWait()
+    this.authorityReplacementWait =
+      options.createAuthorityReplacementWait?.() ?? new BrowserClientHostAuthorityReplacementWait()
     this.routeSets = new PairedRuntimeBrowserClientHostRouteSets({
       createRoutes: options.createRoutes,
       onRecoveryError: (error) => this.handleHostError(error),
