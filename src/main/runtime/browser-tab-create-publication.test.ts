@@ -16,6 +16,7 @@ import {
   browserTabSwitchTakesFocus,
   publishCreatedBrowserSessionTab,
   publishSwitchedBrowserSessionTab,
+  resolveBrowserTabCreateFocus,
   type BrowserTabCreatePlacementKind,
   type BrowserTabCreatePublicationHost,
   type BrowserTabSwitchPlacementKind
@@ -163,16 +164,16 @@ describe('publishCreatedBrowserSessionTab', () => {
         placementKind,
         browserPageId: 'page-1',
         worktreeId: 'wt-1',
-        activate: true,
+        focus: resolveBrowserTabCreateFocus({ activate: true }),
         targetGroupId: 'group-right'
       })
 
       if (BROWSER_TAB_CREATE_PUBLICATION_RULES[placementKind].marksSessionTabFocus) {
-        expect(markHeadlessBrowserSessionTabActive).toHaveBeenCalledWith(
-          'wt-1',
-          'page-1',
-          'group-right'
-        )
+        expect(markHeadlessBrowserSessionTabActive).toHaveBeenCalledWith('wt-1', 'page-1', {
+          targetGroupId: 'group-right',
+          focusesHost: true,
+          navigation: 'all'
+        })
       } else {
         expect(markHeadlessBrowserSessionTabActive).not.toHaveBeenCalled()
       }
@@ -189,7 +190,7 @@ describe('publishCreatedBrowserSessionTab', () => {
           placementKind,
           browserPageId: 'page-1',
           worktreeId: 'wt-1',
-          activate,
+          focus: resolveBrowserTabCreateFocus({ activate }),
           targetGroupId: 'group-right'
         })
       }
@@ -207,7 +208,7 @@ describe('publishCreatedBrowserSessionTab', () => {
         placementKind,
         browserPageId: 'page-1',
         worktreeId: 'wt-1',
-        activate: true
+        focus: resolveBrowserTabCreateFocus({ activate: true })
       })
 
       if (BROWSER_TAB_CREATE_PUBLICATION_RULES[placementKind].activatesBridgeTab) {
@@ -227,7 +228,7 @@ describe('publishCreatedBrowserSessionTab', () => {
         placementKind,
         browserPageId: 'page-1',
         worktreeId: 'wt-1',
-        activate: true
+        focus: resolveBrowserTabCreateFocus({ activate: true })
       })
 
       if (BROWSER_TAB_CREATE_PUBLICATION_RULES[placementKind].notifiesSessionTabsChanged) {
@@ -250,7 +251,7 @@ describe('publishCreatedBrowserSessionTab', () => {
       placementKind: 'client',
       browserPageId: 'page-1',
       worktreeId: 'wt-1',
-      activate: true
+      focus: resolveBrowserTabCreateFocus({ activate: true })
     })
 
     expect(order).toEqual(['notify', 'mark'])
@@ -264,7 +265,7 @@ describe('publishCreatedBrowserSessionTab', () => {
           placementKind: 'offscreen',
           browserPageId: 'page-1',
           worktreeId: 'wt-1',
-          activate: true
+          focus: resolveBrowserTabCreateFocus({ activate: true })
         }
       )
     ).not.toThrow()
@@ -277,7 +278,7 @@ describe('publishCreatedBrowserSessionTab', () => {
       placementKind: 'renderer',
       browserPageId: 'page-1',
       worktreeId: 'wt-1',
-      activate: true
+      focus: resolveBrowserTabCreateFocus({ activate: true })
     })
 
     expect(setActiveTab).not.toHaveBeenCalled()
@@ -289,7 +290,7 @@ describe('publishCreatedBrowserSessionTab', () => {
     publishCreatedBrowserSessionTab(host, {
       placementKind: 'client',
       browserPageId: 'page-1',
-      activate: true
+      focus: resolveBrowserTabCreateFocus({ activate: true })
     })
 
     expect(notifyHeadlessBrowserSessionTabsChanged).not.toHaveBeenCalled()
@@ -315,6 +316,58 @@ describe('browser tab-create activation defaults', () => {
         browserTabCreateTakesFocus(activate)
       )
     }
+  })
+})
+
+describe('browser tab-create focus resolution', () => {
+  it('keeps a local create host-focusing, exactly as it was before navigation existed', () => {
+    expect(resolveBrowserTabCreateFocus({ activate: true })).toEqual({
+      navigation: 'all',
+      selects: true,
+      focusesHost: true,
+      startsActive: true
+    })
+  })
+
+  it('keeps a paired create on the caller when it names no audience', () => {
+    // An old client cannot send `navigation`; being a paired caller is what narrows it.
+    expect(resolveBrowserTabCreateFocus({ activate: true, clientKind: 'runtime' })).toMatchObject({
+      navigation: 'caller',
+      selects: true,
+      focusesHost: false
+    })
+  })
+
+  it.each(['caller', 'clients'] as const)('never focuses the host for navigation %s', (target) => {
+    expect(
+      resolveBrowserTabCreateFocus({ activate: true, navigation: target }).focusesHost
+    ).toBe(false)
+  })
+
+  it.each(['host', 'all'] as const)('focuses the host for navigation %s', (target) => {
+    expect(resolveBrowserTabCreateFocus({ activate: true, navigation: target }).focusesHost).toBe(
+      true
+    )
+  })
+
+  it('selects nothing for a background create however it is addressed', () => {
+    for (const navigation of ['caller', 'host', 'clients', 'all'] as const) {
+      expect(resolveBrowserTabCreateFocus({ navigation })).toMatchObject({
+        selects: false,
+        focusesHost: false
+      })
+      expect(resolveBrowserTabCreateFocus({ activate: false, navigation })).toMatchObject({
+        selects: false,
+        focusesHost: false
+      })
+    }
+  })
+
+  it('leaves the client page registry default on activate alone', () => {
+    expect(resolveBrowserTabCreateFocus({ navigation: 'caller' }).startsActive).toBe(true)
+    expect(
+      resolveBrowserTabCreateFocus({ activate: false, navigation: 'caller' }).startsActive
+    ).toBe(false)
   })
 })
 
@@ -373,11 +426,11 @@ describe('browser tab-create placement census', () => {
         activate: true,
         targetGroupId: 'group-right'
       })
-      expect(markHeadlessBrowserSessionTabActive).toHaveBeenCalledWith(
-        'wt-1',
-        'page-created',
-        'group-right'
-      )
+      expect(markHeadlessBrowserSessionTabActive).toHaveBeenCalledWith('wt-1', 'page-created', {
+        targetGroupId: 'group-right',
+        focusesHost: true,
+        navigation: 'all'
+      })
 
       markHeadlessBrowserSessionTabActive.mockClear()
       await commands.browserTabCreate({
@@ -425,6 +478,75 @@ describe('browser tab-create placement census', () => {
       )
       expect(markHeadlessBrowserSessionTabActive).not.toHaveBeenCalled()
     })
+
+    it('does not focus the host renderer for a create addressed to the caller', async () => {
+      const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
+      const webContents = { send: vi.fn() }
+      webContents.send = vi.fn((_channel: string, data: { requestId: string }) => {
+        const handler = ipcMainOnMock.mock.calls.find(
+          ([eventName]) => eventName === 'browser:tabCreateReply'
+        )?.[1] as
+          | ((event: unknown, reply: { requestId: string; browserPageId?: string }) => void)
+          | undefined
+        handler?.({ sender: webContents } as never, {
+          requestId: data.requestId,
+          browserPageId: 'page-created'
+        })
+      })
+      const commands = new RuntimeBrowserCommands(
+        createCommandHost({
+          getAvailableAuthoritativeWindow: vi.fn(() => ({}) as never),
+          getAuthoritativeWindow: vi.fn(() => ({ webContents }) as never)
+        })
+      )
+
+      await commands.browserTabCreate(
+        { worktree: 'id:wt-1', url: 'about:blank', activate: true, navigation: 'caller' },
+        { pairedDeviceId: 'device-a', clientKind: 'runtime' }
+      )
+
+      // The create IPC is the host renderer's only focus signal, so this flag is the steal.
+      expect(webContents.send).toHaveBeenCalledWith(
+        'browser:requestTabCreate',
+        expect.objectContaining({ activate: false })
+      )
+    })
+
+    it('still places a caller-addressed client page in the clicked split group', async () => {
+      const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
+      const markHeadlessBrowserSessionTabActive = vi.fn()
+      const commands = new RuntimeBrowserCommands(
+        createCommandHost({
+          getOffscreenBrowserBackend: vi.fn(
+            () =>
+              ({
+                createTab: vi.fn(async () => ({ browserPageId: 'page-created' })),
+                closeTab: vi.fn()
+              }) as never
+          ),
+          markHeadlessBrowserSessionTabActive
+        })
+      )
+
+      await commands.browserTabCreate(
+        {
+          worktree: 'id:wt-1',
+          url: 'about:blank',
+          activate: true,
+          navigation: 'caller',
+          targetGroupId: 'group-right'
+        },
+        { pairedDeviceId: 'device-a', clientKind: 'runtime' }
+      )
+
+      // Suppressing the focus must not suppress the group move — the same call carries both.
+      expect(markHeadlessBrowserSessionTabActive).toHaveBeenCalledWith('wt-1', 'page-created', {
+        targetGroupId: 'group-right',
+        focusesHost: false,
+        navigation: 'caller',
+        clientNavigationId: 'device-a'
+      })
+    })
   })
 
   it('names every placement kind the command adapter can select', () => {
@@ -463,7 +585,11 @@ describe('publishSwitchedBrowserSessionTab', () => {
         worktreeId: 'wt-1',
         focus: true
       })
-      expect(focused.markHeadlessBrowserSessionTabActive).toHaveBeenCalledWith('wt-1', 'page-1')
+      // Why the literal: an explicit switch is still host-facing, and the create path's
+      // caller-local shape must not leak into it.
+      expect(focused.markHeadlessBrowserSessionTabActive).toHaveBeenCalledWith('wt-1', 'page-1', {
+        focusesHost: true
+      })
 
       for (const focus of [false, undefined]) {
         const unfocused = createPublicationHost()
@@ -619,7 +745,9 @@ describe('browser tab-switch placement census', () => {
         commands.browserTabSwitch({ worktree: 'id:wt-1', page: 'page-b', focus: true })
       ).resolves.toEqual({ switched: 1, browserPageId: 'page-b' })
       expect(registry.getPage('page-b')?.active).toBe(true)
-      expect(markHeadlessBrowserSessionTabActive).toHaveBeenCalledWith('wt-1', 'page-b')
+      expect(markHeadlessBrowserSessionTabActive).toHaveBeenCalledWith('wt-1', 'page-b', {
+        focusesHost: true
+      })
       expect(notifyHeadlessBrowserSessionTabsChanged).toHaveBeenCalledWith('wt-1')
 
       markHeadlessBrowserSessionTabActive.mockClear()
@@ -657,7 +785,9 @@ describe('browser tab-switch placement census', () => {
       )
 
       await commands.browserTabSwitch({ worktree: 'id:wt-1', page: 'page-server', focus: true })
-      expect(markHeadlessBrowserSessionTabActive).toHaveBeenCalledWith('wt-1', 'page-server')
+      expect(markHeadlessBrowserSessionTabActive).toHaveBeenCalledWith('wt-1', 'page-server', {
+        focusesHost: true
+      })
 
       markHeadlessBrowserSessionTabActive.mockClear()
       await commands.browserTabSwitch({ worktree: 'id:wt-1', page: 'page-server' })

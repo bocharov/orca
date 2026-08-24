@@ -42,7 +42,8 @@ describe('browser RPC methods', () => {
 
     expect(JSON.parse(replies[0]!)).toMatchObject({ ok: true })
     expect(runtime.browserTabCreate).toHaveBeenCalledWith(params, {
-      pairedDeviceId: 'device-a'
+      pairedDeviceId: 'device-a',
+      clientKind: 'runtime'
     })
   })
 
@@ -108,11 +109,14 @@ describe('browser RPC methods', () => {
       page: 'page-1',
       url: 'https://example.com'
     })
-    expect(runtime.browserTabCreate).toHaveBeenCalledWith({
-      worktree: 'id:wt-1',
-      url: 'https://example.com',
-      profileId: 'profile-1'
-    })
+    expect(runtime.browserTabCreate).toHaveBeenCalledWith(
+      {
+        worktree: 'id:wt-1',
+        url: 'https://example.com',
+        profileId: 'profile-1'
+      },
+      { clientKind: undefined }
+    )
     expect(runtime.browserTabSwitch).toHaveBeenCalledWith({
       worktree: 'id:wt-1',
       index: 0,

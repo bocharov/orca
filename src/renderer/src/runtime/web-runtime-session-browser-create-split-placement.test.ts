@@ -137,6 +137,7 @@ describe('createWebRuntimeSessionBrowserTab', () => {
         url: undefined,
         profileId: undefined,
         activate: false,
+        navigation: 'caller',
         waitForRegistration: false
       },
       timeoutMs: 15_000

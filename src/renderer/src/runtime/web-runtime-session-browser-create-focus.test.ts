@@ -126,6 +126,9 @@ describe('createWebRuntimeSessionBrowserTab', () => {
         // Why: a user-initiated "New Browser Tab" focuses the new tab, which on a
         // headless host marks it active in the session snapshot.
         activate: true,
+        // Why: without this the host moved every paired device — and its own UI — onto a tab
+        // only this client asked for.
+        navigation: 'caller',
         waitForRegistration: false
       },
       timeoutMs: 15_000

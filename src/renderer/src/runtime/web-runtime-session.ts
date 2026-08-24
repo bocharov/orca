@@ -720,6 +720,10 @@ export async function createWebRuntimeSessionBrowserTab(args: {
           ...(placement.kind === 'client' ? { placement } : {}),
           profileId: args.profileId ?? undefined,
           activate: shouldFocusOnCreate,
+          // Why: `activate` alone made every paired device — the host desktop included — jump to a
+          // tab this client created. New hosts read `navigation`; old ones ignore it and keep
+          // today's behavior, which is also what keeps their targetGroupId placement working.
+          navigation: 'caller',
           // Why: place the new browser in the clicked split group so the host snapshot is authoritative for it (no left-snap).
           ...(args.targetGroupId ? { targetGroupId: args.targetGroupId } : {}),
           // Why: web clients need the local tab now; waiting for host webview registration makes the workspace appear to close.

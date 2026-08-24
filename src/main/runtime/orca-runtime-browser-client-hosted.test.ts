@@ -232,11 +232,12 @@ describe('RuntimeBrowserCommands client-hosted routing', () => {
       },
       { pairedDeviceId: 'device-a' }
     )
-    expect(markHeadlessBrowserSessionTabActive).toHaveBeenCalledWith(
-      'wt-1',
-      'page-grouped',
-      'group-right'
-    )
+    expect(markHeadlessBrowserSessionTabActive).toHaveBeenCalledWith('wt-1', 'page-grouped', {
+      targetGroupId: 'group-right',
+      focusesHost: true,
+      navigation: 'all',
+      clientNavigationId: 'device-a'
+    })
 
     markHeadlessBrowserSessionTabActive.mockClear()
     await commands.browserTabCreate(
@@ -249,6 +250,50 @@ describe('RuntimeBrowserCommands client-hosted routing', () => {
     )
     // Why: agent/background creates must not yank a connected client to the new tab.
     expect(markHeadlessBrowserSessionTabActive).not.toHaveBeenCalled()
+  })
+
+  it('keeps a background client page out of the workspace current-page slot', async () => {
+    const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
+    const registry = new RuntimeBrowserPageRegistry()
+    const commands = new RuntimeBrowserCommands(
+      createHost({
+        resolveBrowserNetworkExecutionHost: vi.fn(async () => ({
+          kind: 'native' as const,
+          runtimeId: 'runtime-a',
+          revision: 7
+        })),
+        getRuntimeBrowserPageRegistry: () => registry,
+        getBrowserHostLeaseRegistry: () =>
+          ({
+            authorityRuntimeId: 'runtime-a',
+            authorityEpoch: 'epoch-a',
+            createClientPage: vi.fn(async () => ({
+              kind: 'client' as const,
+              browserHostClientId: 'host-a',
+              browserHostGeneration: 3,
+              pageHostGeneration: 9
+            })),
+            issueClientPageCommand: vi.fn(() => ({
+              event: {} as never,
+              result: Promise.resolve({ status: 'completed' as const })
+            }))
+          }) as never
+      })
+    )
+
+    // `active` is what browser.tabCurrent resolves for agents, so an opted-out create must not
+    // take the slot from the page the user is actually on.
+    await commands.browserTabCreate(
+      {
+        worktree: 'id:wt-1',
+        page: 'page-background',
+        activate: false,
+        placement: { kind: 'client', browserHostClientId: 'host-a' }
+      },
+      { pairedDeviceId: 'device-a' }
+    )
+
+    expect(registry.getPage('page-background')).toMatchObject({ active: false })
   })
 
   it('publishes the proven client page before navigation and scopes it to the worktree', async () => {
