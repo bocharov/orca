@@ -22,6 +22,7 @@ import type {
   RuntimeMobileSessionTabGroup,
   RuntimeMobileSessionTerminalClientTab
 } from '../../../shared/runtime-types'
+import { hostSnapshotAffirmsWorktreeContents } from './host-session-snapshot-authority'
 import type {
   BrowserCertificateFailure,
   BrowserPage,
@@ -1678,6 +1679,23 @@ function browserWorkspaceHasRemoteEnvironmentPage(
   )
 }
 
+/** A page of this environment whose guest runs on this desktop, so it survives the host process. */
+function browserWorkspaceHasClientHostedEnvironmentPage(
+  state: WebSessionTabsSyncState,
+  workspace: BrowserWorkspace,
+  environmentId: string
+): boolean {
+  return (state.browserPagesByWorkspace[workspace.id] ?? []).some((page) => {
+    const handle = state.remoteBrowserPageHandlesByPageId[page.id]
+    return (
+      handle?.environmentId === environmentId &&
+      (handle.placement?.kind === 'client' ||
+        handle.stagedClientHosted === true ||
+        handle.restoredClientHosted === true)
+    )
+  })
+}
+
 /**
  * The host publishes `title || url || 'Browser'` (see the runtime's browser tab projection), so a
  * page that has not produced a real title yet arrives as its own url — or as the bare default.
@@ -2803,6 +2821,16 @@ function applyWebSessionTabsSnapshotWithContext(
             const handle = state.remoteBrowserPageHandlesByPageId[page.id]
             return handle?.staged === true || handle?.restoredFromSession === true
           })
+        ) {
+          return false
+        }
+        // Why: a runtime that has published nothing for this worktree yet answers with an empty
+        // frame that looks exactly like "everything was closed". A page this desktop is still
+        // hosting outlives the runtime process, so its own guest is the better evidence — hold the
+        // row and let re-adoption publish it, rather than deleting a tab that is still rendering.
+        if (
+          !hostSnapshotAffirmsWorktreeContents(snapshot) &&
+          browserWorkspaceHasClientHostedEnvironmentPage(state, tab, environmentId)
         ) {
           return false
         }

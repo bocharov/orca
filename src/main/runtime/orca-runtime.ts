@@ -486,7 +486,8 @@ import {
   type RuntimeSyncWindowGraph,
   type RuntimeWorktreeListResult,
   type BrowserTabInfo,
-  type BrowserScreencastResult
+  type BrowserScreencastResult,
+  UNPUBLISHED_WORKTREE_PUBLICATION_EPOCH
 } from '../../shared/runtime-types'
 import {
   RUNTIME_GRAPH_RELOAD_TIMEOUT_MS,
@@ -33631,7 +33632,7 @@ export class OrcaRuntimeService {
       return this.clientSessionTabSelections.project(
         {
           worktree: worktreeId,
-          publicationEpoch: 'none',
+          publicationEpoch: UNPUBLISHED_WORKTREE_PUBLICATION_EPOCH,
           snapshotVersion: 0,
           activeGroupId: null,
           activeTabId: null,
