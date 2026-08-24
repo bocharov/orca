@@ -1,3 +1,7 @@
+import {
+  isWebviewDragPassthroughActive,
+  registerWebviewDragPassthroughSurface
+} from './host-guest/webview-drag-passthrough'
 import type { BrowserClientRetainedRendererPage as RetainedPage } from './browser-client-page-retained-state'
 
 export type BrowserClientPageVisibleAttachment = {
@@ -59,10 +63,30 @@ export function attachBrowserClientRetainedPage(
   }
 }
 
+/** The retained host's click-through state is derived, never saved and restored: it is the
+ *  only writer of the property, and a drag spanning a hide/show would otherwise put back a
+ *  value captured under the opposite visibility. */
+function applyRetainedHostPointerEvents(
+  host: HTMLDivElement,
+  visible: boolean,
+  dragPassthrough: boolean
+): void {
+  host.style.pointerEvents = visible && !dragPassthrough ? 'auto' : 'none'
+}
+
+/** Enrols a retained host in the shared guest passthrough set, so a drag reaches the document
+ *  through this body-level overlay the way it already does through local pane guests. Call after
+ *  the page's fields are in place: enrolment reads its visibility immediately. */
+export function enrolRetainedHostDragPassthrough(page: RetainedPage): () => void {
+  return registerWebviewDragPassthroughSurface((passthrough) => {
+    applyRetainedHostPointerEvents(page.host, page.visibleAttachment !== null, passthrough)
+  })
+}
+
 function showRetainedHost(host: HTMLDivElement, container: HTMLElement): () => void {
   host.inert = false
   host.removeAttribute('aria-hidden')
-  host.style.pointerEvents = 'auto'
+  applyRetainedHostPointerEvents(host, true, isWebviewDragPassthroughActive())
   let appliedBounds = ''
   const syncViewport = (): void => {
     const bounds = container.getBoundingClientRect()
