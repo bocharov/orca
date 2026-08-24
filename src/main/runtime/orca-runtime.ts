@@ -379,6 +379,11 @@ import type {
 import type { ExactWorkerProviderSession } from '../../shared/orchestration-worker-output'
 import { applyBrowserSessionTabSelection } from './browser-session-tab-selection-snapshot'
 import type { BrowserSessionTabSelectionOptions } from './browser-tab-create-publication'
+import {
+  resolveBrowserDriverAfterMobileRelease,
+  screencastSubscriberDrivesAsMobile,
+  type BrowserScreencastSubscriber
+} from './browser-screencast-driver-scope'
 import type { RuntimeClientEvent } from '../../shared/runtime-client-events'
 import { toRuntimeActivateWorktreeEvent } from '../../shared/runtime-client-events'
 import {
@@ -3297,10 +3302,7 @@ export class OrcaRuntimeService {
     string,
     { cancel: (emitEnd?: boolean) => void; done: Promise<void>; connectionKey: string }
   >()
-  private activeBrowserScreencastsByPage = new Map<
-    string,
-    Set<{ cancel: (emitEnd?: boolean) => void; done: Promise<void>; connectionKey: string }>
-  >()
+  private activeBrowserScreencastsByPage = new Map<string, Set<BrowserScreencastSubscriber>>()
   // Why: mobile clients subscribe to desktop notifications via
   // notifications.subscribe. This set enables fan-out — each connected
   // mobile client gets its own listener, and dispatchMobileNotification
@@ -15151,7 +15153,10 @@ export class OrcaRuntimeService {
   reclaimBrowserForDesktop(browserPageId: string): boolean {
     this.setBrowserDriver(browserPageId, { kind: 'desktop' })
     for (const stream of this.activeBrowserScreencastsByPage.get(browserPageId) ?? []) {
-      stream.cancel(true)
+      // Why: take-back revokes the phone's control, not a co-viewing desktop/web client's stream.
+      if (stream.drivesAsMobile) {
+        stream.cancel(true)
+      }
     }
     return true
   }
@@ -38494,6 +38499,7 @@ export class OrcaRuntimeService {
     options: {
       connectionId?: string
       pairedDeviceId?: string
+      clientKind?: 'mobile' | 'runtime'
       sendBinary?: (bytes: Uint8Array<ArrayBufferLike>) => boolean | void
       signal?: AbortSignal
       emit: (result: BrowserScreencastResult) => void
@@ -38507,6 +38513,7 @@ export class OrcaRuntimeService {
     }
 
     const connectionKey = options.connectionId ?? 'local'
+    const drivesAsMobile = screencastSubscriberDrivesAsMobile(options.clientKind)
     let existingStream = this.activeBrowserScreencastsByConnection.get(connectionKey)
     while (existingStream) {
       existingStream.cancel()
@@ -38520,11 +38527,7 @@ export class OrcaRuntimeService {
     let screencast: Awaited<ReturnType<RuntimeBrowserCommands['browserScreencast']>> | null = null
     let registeredSubscriptionId: string | null = null
     let activeBrowserPageId: string | null = null
-    let activePageStream: {
-      cancel: (emitEnd?: boolean) => void
-      done: Promise<void>
-      connectionKey: string
-    } | null = null
+    let activePageStream: BrowserScreencastSubscriber | null = null
     let ended = false
     let cancelledBeforeStart = false
     let readyEmitted = false
@@ -38580,18 +38583,17 @@ export class OrcaRuntimeService {
       activePageStream = {
         cancel,
         done: activeDone,
-        connectionKey
+        connectionKey,
+        drivesAsMobile
       }
       const pageStreams =
         this.activeBrowserScreencastsByPage.get(activeBrowserPageId) ??
-        new Set<{
-          cancel: (emitEnd?: boolean) => void
-          done: Promise<void>
-          connectionKey: string
-        }>()
+        new Set<BrowserScreencastSubscriber>()
       pageStreams.add(activePageStream)
       this.activeBrowserScreencastsByPage.set(activeBrowserPageId, pageStreams)
-      this.setBrowserDriver(activeBrowserPageId, { kind: 'mobile', clientId: connectionKey })
+      if (drivesAsMobile) {
+        this.setBrowserDriver(activeBrowserPageId, { kind: 'mobile', clientId: connectionKey })
+      }
 
       // Why: screencast frames are connection-scoped; tie Page.stopScreencast to the exact socket so dropped connections don't leave Chromium streaming.
       this.registerSubscriptionCleanup(
@@ -38630,10 +38632,9 @@ export class OrcaRuntimeService {
         }
         const driver = this.getBrowserDriver(activeBrowserPageId)
         if (driver.kind === 'mobile' && driver.clientId === connectionKey) {
-          const fallback = Array.from(pageStreams ?? []).at(-1)
           this.setBrowserDriver(
             activeBrowserPageId,
-            fallback ? { kind: 'mobile', clientId: fallback.connectionKey } : { kind: 'idle' }
+            resolveBrowserDriverAfterMobileRelease(pageStreams ?? [])
           )
         }
       }
