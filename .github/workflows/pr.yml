@@ -768,7 +768,7 @@ jobs:
           # snapshot the client culls rows against. Only two real Electron apps can catch it.
           # orca-runtime.ts is included despite its churn: it publishes the snapshot flag the client
           # holds its rows on, and no narrower path names that seam.
-          if printf '%s\n' "$CHANGED" | grep -Ev '\.test\.tsx?$' | grep -Eq '^src/.*([Cc]lient-?[Hh]osted|browser-host-(lease|page|client-page)|browser-client-(host|page)|runtime-browser-(client-)?page|session-tabs-sync|host-session-snapshot-authority|orca-runtime(-browser)?\.ts|runtime-(status|types)\.ts)'; then
+          if printf '%s\n' "$CHANGED" | grep -Ev '\.test\.tsx?$' | grep -Eq '^src/.*([Cc]lient-?[Hh]osted|browser-host-(lease|page|client-page)|browser-client-(host|page)|runtime-browser-(client-)?page|session-tabs-sync|host-session-snapshot-authority|orca-runtime(-browser)?\.ts|/runtime-(status|types)\.ts)'; then
             TEST_FILES="$(printf '%s\n%s\n' "$TEST_FILES" 'tests/e2e/paired-client-hosted-browser-restart-survival.spec.ts' | sort -u)"
           fi
           TEST_FILES_JSON="$(printf '%s\n' "$TEST_FILES" | jq --raw-input --slurp --compact-output 'split("\n") | map(select(length > 0))')"

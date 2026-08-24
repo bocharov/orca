@@ -30,23 +30,16 @@ export class BrowserHostPageReconciliationOrchestrator {
   ) {}
 
   /**
-   * Reconciles the whole inventory: an entry no intent claims is an orphan this runtime closes.
-   */
-  reconcile(
-    state: BrowserHostLeaseState,
-    intents: readonly BrowserHostRuntimePageIntent[],
-    options: BrowserHostPageReconciliationOptions = {}
-  ): Promise<BrowserHostPageReconciliationResult> {
-    return this.run(state, intents, options, (inventory) => inventory)
-  }
-
-  /**
    * Reconciles only the entries the intents name.
    *
    * Adoption speaks for the pages it decided to take back and for nothing else: an entry it declined
    * -- another host's, one already tracked, one whose workspace will not resolve right now -- is not
    * evidence of an orphan, and planning against the full inventory would put every one of them in
    * the close bucket and destroy a live guest the client is still showing.
+   *
+   * There is deliberately no whole-inventory counterpart. Planning against everything the client
+   * reports puts each unclaimed entry in the close bucket, which is how adoption once destroyed the
+   * live pages it had declined; nothing in the runtime has a reason to speak for those entries.
    */
   adopt(
     state: BrowserHostLeaseState,

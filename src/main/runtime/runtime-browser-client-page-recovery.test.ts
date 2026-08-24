@@ -208,6 +208,25 @@ describe('runtime browser client page recovery', () => {
     })
   })
 
+  it('recovers the pages adoption did not take while leaving the ones it did', async () => {
+    const { authority, pages } = harness({ pageIds: ['page-a', 'page-b'] })
+
+    await recoverUnavailableRuntimeBrowserClientPages({
+      lease: lease([]),
+      authority,
+      pages,
+      notifyWorkspace: vi.fn(),
+      adoptedPageIds: new Set(['page-a'])
+    })
+
+    expect(authority.createClientPage).toHaveBeenCalledOnce()
+    expect(authority.createClientPage).toHaveBeenCalledWith(
+      expect.objectContaining({ browserPageId: 'page-b' })
+    )
+    expect(pages.getPage('page-a')?.placement).toMatchObject({ pageHostGeneration: 7 })
+    expect(pages.getPage('page-b')?.placement).toMatchObject({ pageHostGeneration: 10 })
+  })
+
   it('recovers a page retained from a host generation that quit', async () => {
     const { authority, commands, notifyWorkspace, pages, placements } = harness({
       url: 'https://retained.internal/'

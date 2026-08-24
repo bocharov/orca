@@ -221,14 +221,6 @@ export class BrowserHostLeaseRegistry {
     return requireLiveBrowserClientPage(this.pagePlacements, this.leasesByClientId, authority)
   }
 
-  reconcileClientPages(
-    identity: BrowserHostLeaseIdentity,
-    intents: readonly BrowserHostRuntimePageIntent[],
-    options: { maxConcurrency?: number; actionTimeoutMs?: number; signal?: AbortSignal } = {}
-  ) {
-    return this.pageReconciliations.reconcile(this.requireLeaseState(identity), intents, options)
-  }
-
   adoptClientPages(
     identity: BrowserHostLeaseIdentity,
     intents: readonly BrowserHostRuntimePageIntent[],
