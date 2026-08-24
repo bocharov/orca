@@ -222,28 +222,23 @@ async function openClientHostedFixturePage(
 }
 
 /**
- * Reads the marker out of the guest belonging to one specific row.
+ * Reads the marker out of the guest belonging to one specific page.
  *
- * Scoped to that row's pane rather than to every `<webview>` on the page: a scan by URL alone is
+ * Bound to that page's retained host rather than scanning every `<webview>`: a scan by URL alone is
  * satisfied by any guest on the fixture origin, so a run that lost the surviving tab and opened a
- * fresh one would still read `moved-on` and pass.
+ * fresh one would still read `moved-on` and pass. Client-hosted guests never enter their pane's
+ * subtree -- the host is a fixed-position overlay -- so the binding is the stamped page id, which
+ * is also the identity the restart has to preserve.
  */
 async function readClientWebviewMarker(
   page: Page,
-  target: { urlPrefix: string; localPageId: string }
+  target: { urlPrefix: string; remotePageId: string }
 ): Promise<string | null> {
-  return page.evaluate(async ({ urlPrefix, localPageId }) => {
-    const state = window.__store?.getState()
-    const workspaceId = Object.entries(state?.browserPagesByWorkspace ?? {}).find(([, pages]) =>
-      pages.some((browserPage) => browserPage.id === localPageId)
-    )?.[0]
-    if (!workspaceId) {
-      return null
-    }
-    const pane = document.querySelector(
-      `[data-browser-overlay-tab-id="${CSS.escape(workspaceId)}"]`
+  return page.evaluate(async ({ urlPrefix, remotePageId }) => {
+    const host = document.querySelector(
+      `[data-browser-client-page-id="${CSS.escape(remotePageId)}"]`
     )
-    for (const candidate of pane?.querySelectorAll('webview') ?? []) {
+    for (const candidate of host?.querySelectorAll('webview') ?? []) {
       const webview = candidate as Electron.WebviewTag
       try {
         if (!webview.getURL().startsWith(urlPrefix)) {
@@ -262,7 +257,7 @@ async function readClientWebviewMarker(
 
 async function waitForRenderedClientWebview(
   page: Page,
-  target: { urlPrefix: string; localPageId: string },
+  target: { urlPrefix: string; remotePageId: string },
   message: string
 ): Promise<string> {
   await expect
@@ -352,7 +347,7 @@ test('keeps a client-hosted browser tab across a paired runtime restart', async 
     expect(
       await waitForRenderedClientWebview(
         client.page,
-        { urlPrefix: fixture.markerUrl, localPageId: opened.localPageId },
+        { urlPrefix: fixture.markerUrl, remotePageId: opened.remotePageId },
         'client-hosted guest never rendered the fixture'
       )
     ).toBe('restart-survivor')
@@ -370,7 +365,7 @@ test('keeps a client-hosted browser tab across a paired runtime restart', async 
     expect(
       await waitForRenderedClientWebview(
         client.page,
-        { urlPrefix: fixture.movedUrl, localPageId: opened.localPageId },
+        { urlPrefix: fixture.movedUrl, remotePageId: opened.remotePageId },
         'the guest never rendered the page it navigated to'
       )
     ).toBe('moved-on')
@@ -425,7 +420,7 @@ test('keeps a client-hosted browser tab across a paired runtime restart', async 
     expect(
       await waitForRenderedClientWebview(
         client.page,
-        { urlPrefix: fixture.movedUrl, localPageId: survivor!.localPageId },
+        { urlPrefix: fixture.movedUrl, remotePageId: survivor!.remotePageId },
         'the surviving tab never rendered its guest again'
       ),
       'the tab must come back where the user left it, not on its create URL'

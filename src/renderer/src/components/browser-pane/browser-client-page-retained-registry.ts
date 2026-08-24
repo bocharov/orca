@@ -160,7 +160,7 @@ export class BrowserClientPageRetainedRegistry {
   }
 
   private createPage(identity: RendererPageIdentity, key: string): RetainedPage {
-    const host = createBrowserClientPageRetainedHost(this.options.document)
+    const host = createBrowserClientPageRetainedHost(this.options.document, identity.browserPageId)
     const webview = createBrowserClientPageWebview({
       createWebview: this.options.createWebview,
       document: this.options.document,
