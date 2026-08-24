@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   state: null as MockAppState | null,
   automationVisiblePageIds: new Set<string>(),
   mobileDrivenPageIds: new Set<string>(),
+  remotelyViewedPageIds: new Set<string>(),
   focusGroup: vi.fn()
 }))
 
@@ -38,6 +39,11 @@ vi.mock('../host-guest/browser-automation-visibility', () => ({
 vi.mock('@/lib/pane-manager/browser-mobile-driver-state', () => ({
   useBrowserMobileDriverForAny: (pageIds: readonly string[]) =>
     pageIds.some((pageId) => mocks.mobileDrivenPageIds.has(pageId))
+}))
+
+vi.mock('@/lib/pane-manager/browser-remote-viewer-state', () => ({
+  useBrowserRemoteViewerForAny: (pageIds: readonly string[]) =>
+    pageIds.some((pageId) => mocks.remotelyViewedPageIds.has(pageId))
 }))
 
 vi.mock('./browser-workspace-pane', () => ({
@@ -80,6 +86,7 @@ describe('BrowserPaneOverlayLayer', () => {
   beforeEach(() => {
     mocks.automationVisiblePageIds.clear()
     mocks.mobileDrivenPageIds.clear()
+    mocks.remotelyViewedPageIds.clear()
     mocks.focusGroup.mockClear()
     mocks.state = createState()
   })
@@ -290,6 +297,16 @@ describe('BrowserPaneOverlayLayer', () => {
 
   it('keeps a mobile-controlled hidden browser pane mounted', () => {
     mocks.mobileDrivenPageIds.add('page-b')
+
+    const markup = renderOverlay({ isWorktreeActive: false })
+
+    expect(markup).not.toContain('data-browser-pane-id="browser-a"')
+    expect(markup).toContain('data-browser-pane-id="browser-b"')
+    expect(markup).toContain('data-browser-pane-active="false"')
+  })
+
+  it('keeps a remotely viewed hidden browser pane mounted', () => {
+    mocks.remotelyViewedPageIds.add('page-b')
 
     const markup = renderOverlay({ isWorktreeActive: false })
 

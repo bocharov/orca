@@ -49,6 +49,7 @@ export function BrowserPagePane({
   chromeShortcutScope,
   isAutomationVisible,
   isMobileDriven,
+  isRemotelyViewed,
   inputLocked,
   onUpdatePageState,
   onSetUrl
@@ -62,6 +63,7 @@ export function BrowserPagePane({
   chromeShortcutScope: BrowserChromeShortcutScope
   isAutomationVisible: boolean
   isMobileDriven: boolean
+  isRemotelyViewed: boolean
   inputLocked: boolean
   onUpdatePageState: (tabId: string, updates: BrowserTabPageState) => void
   onSetUrl: BrowserPageUrlSetter
@@ -69,7 +71,8 @@ export function BrowserPagePane({
   const isPaintable = isBrowserPagePanePaintable({
     isActive,
     isAutomationVisible,
-    isMobileDriven
+    isMobileDriven,
+    hasRemoteViewer: isRemotelyViewed
   })
   const pageViewport = ensureBrowserPageViewport(browserTab.id, workspaceId)
   const pageViewportContainer = pageViewport?.container ?? null

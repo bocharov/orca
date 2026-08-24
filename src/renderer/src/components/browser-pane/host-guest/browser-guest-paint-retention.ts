@@ -2,13 +2,14 @@ import { useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../../../store'
 import { useBrowserMobileDriverForAny } from '../../../lib/pane-manager/browser-mobile-driver-state'
+import { useBrowserRemoteViewerForAny } from '../../../lib/pane-manager/browser-remote-viewer-state'
 import { useBrowserAutomationVisibilityForAny } from './browser-automation-visibility'
 
 // Why: Chromium never paints inside a display:none subtree, so a browser <webview> stops
 // emitting screencast frames if ANY ancestor is parked that way — the pane-level hatch in
 // browser-page-paintability.ts cannot override one. Every container from the app shell down
-// to the guest therefore shares this predicate; if one of them keeps using `hidden`, a phone
-// or an agent driving that page silently receives no frames.
+// to the guest therefore shares this predicate; if one of them keeps using `hidden`, a phone,
+// an agent, or a paired client watching that page silently receives no frames.
 
 type BrowserTabPageIdSource = {
   id: string
@@ -37,7 +38,8 @@ export function useWorktreeBrowserPageIds(worktreeId: string): string[] {
 export function useBrowserGuestPaintRetention(browserPageIds: readonly string[]): boolean {
   const hasAutomationVisibleBrowser = useBrowserAutomationVisibilityForAny(browserPageIds)
   const hasMobileDrivenBrowser = useBrowserMobileDriverForAny(browserPageIds)
-  return hasAutomationVisibleBrowser || hasMobileDrivenBrowser
+  const hasRemotelyViewedBrowser = useBrowserRemoteViewerForAny(browserPageIds)
+  return hasAutomationVisibleBrowser || hasMobileDrivenBrowser || hasRemotelyViewedBrowser
 }
 
 // Why: `enabled` gates a scan across every worktree's tabs, which only matters while the

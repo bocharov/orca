@@ -9,6 +9,7 @@ import type { BrowserChromeShortcutScope } from '../describe-page/browser-page-t
 import { tabGroupBodyAnchorName } from '../../tab-group/tab-group-body-anchor'
 import { useBrowserAutomationVisibilityForAny } from '../host-guest/browser-automation-visibility'
 import { useBrowserMobileDriverForAny } from '@/lib/pane-manager/browser-mobile-driver-state'
+import { useBrowserRemoteViewerForAny } from '@/lib/pane-manager/browser-remote-viewer-state'
 import {
   isClientHostedBrowserRowSelectionLive,
   useClientHostedBrowserRowSelection,
@@ -61,9 +62,10 @@ const BrowserOverlaySlot = memo(function BrowserOverlaySlot({
       : [browserTab.activePageId ?? browserTab.id]
   const automationVisible = useBrowserAutomationVisibilityForAny(browserPageIds)
   const mobileDriven = useBrowserMobileDriverForAny(browserPageIds)
-  const isPaintable = isActive || automationVisible || mobileDriven
-  // Why: hidden worktrees keep lightweight overlay slots, but park their webviews unless a remote controller needs the guest.
-  const shouldMountPane = isWorktreeActive || automationVisible || mobileDriven
+  const remotelyViewed = useBrowserRemoteViewerForAny(browserPageIds)
+  const isPaintable = isActive || automationVisible || mobileDriven || remotelyViewed
+  // Why: hidden worktrees keep lightweight overlay slots, but park their webviews unless a remote controller or viewer needs the guest.
+  const shouldMountPane = isWorktreeActive || automationVisible || mobileDriven || remotelyViewed
   // Why: CSS anchor positioning pins the overlay to its owning group's body — a tab move only swaps positionAnchor, no measurement/state.
   // Orphan branch (no anchorName) stays display:none until the tab is reassigned or destroyed.
   const style: React.CSSProperties = useMemo(

@@ -87,6 +87,10 @@ import {
   setDriverForBrowserPage
 } from '@/lib/pane-manager/browser-mobile-driver-state'
 import {
+  hydrateBrowserRemoteViewerPages,
+  setRemoteViewersForBrowserPage
+} from '@/lib/pane-manager/browser-remote-viewer-state'
+import {
   applyClientHostedBrowserRows,
   hydrateClientHostedBrowserRows
 } from '@/lib/pane-manager/client-hosted-browser-row-state'
@@ -3895,6 +3899,13 @@ export function useIpcEvents(): void {
             driver: RuntimeBrowserDriverState
           }
         }
+      | {
+          kind: 'browser-remote-viewers'
+          event: {
+            browserPageId: string
+            hasRemoteViewers: boolean
+          }
+        }
     const pendingMobileStateEvents: PendingMobileStateEvent[] = []
     let mobileStateHydrationDisposed = false
 
@@ -3905,8 +3916,13 @@ export function useIpcEvents(): void {
           setFitOverride(ptyId, mode, cols, rows)
         } else if (pending.kind === 'driver') {
           setDriverForPty(pending.event.ptyId, pending.event.driver)
-        } else {
+        } else if (pending.kind === 'browser-driver') {
           setDriverForBrowserPage(pending.event.browserPageId, pending.event.driver)
+        } else {
+          setRemoteViewersForBrowserPage(
+            pending.event.browserPageId,
+            pending.event.hasRemoteViewers
+          )
         }
       }
       pendingMobileStateEvents.length = 0
@@ -3971,6 +3987,22 @@ export function useIpcEvents(): void {
       })
     )
 
+    const unsubscribeBrowserRemoteViewers = window.api.runtime.onBrowserRemoteViewersChanged?.(
+      (event) => {
+        if (isRuntimeEnvironmentActive()) {
+          return
+        }
+        if (!mobileStateHydrated) {
+          enqueuePendingMobileStateEvent({ kind: 'browser-remote-viewers', event })
+          return
+        }
+        setRemoteViewersForBrowserPage(event.browserPageId, event.hasRemoteViewers)
+      }
+    )
+    if (unsubscribeBrowserRemoteViewers) {
+      unsubs.push(unsubscribeBrowserRemoteViewers)
+    }
+
     // Why: no isRuntimeEnvironmentActive guard, unlike the driver channels above. These rows
     // describe pages a paired client renders for THIS runtime's own worktrees; pointing the window
     // at a remote environment does not make them someone else's, and dropping them would leave the
@@ -4020,15 +4052,17 @@ export function useIpcEvents(): void {
       void Promise.all([
         window.api.runtime.getTerminalFitOverrides(),
         window.api.runtime.getTerminalDrivers(),
-        window.api.runtime.getBrowserDrivers()
+        window.api.runtime.getBrowserDrivers(),
+        window.api.runtime.getBrowserRemoteViewerPages?.() ?? []
       ])
-        .then(([overrides, drivers, browserDrivers]) => {
+        .then(([overrides, drivers, browserDrivers, remoteViewerPages]) => {
           if (mobileStateHydrationDisposed) {
             return
           }
           hydrateOverrides(overrides)
           hydrateDrivers(drivers)
           hydrateBrowserDrivers(browserDrivers)
+          hydrateBrowserRemoteViewerPages(remoteViewerPages)
           mobileStateHydrated = true
           applyPendingMobileStateEvents()
         })

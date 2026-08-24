@@ -41,6 +41,7 @@ export type RuntimeApi = {
         driver: RuntimeBrowserDriverState
       }[]
     >
+    getBrowserRemoteViewerPages?: () => Promise<string[]>
     getClientHostedBrowserRows: () => Promise<ClientHostedBrowserRowsEvent[]>
     restoreTerminalFit: (ptyId: string) => Promise<{ restored: boolean }>
     reclaimBrowserForDesktop: (browserPageId: string) => Promise<{ reclaimed: boolean }>
@@ -60,6 +61,11 @@ export type RuntimeApi = {
     ) => () => void
     onBrowserDriverChanged: (
       callback: (event: { browserPageId: string; driver: RuntimeBrowserDriverState }) => void
+    ) => () => void
+    // Why optional: matches onNativeChatLaunchDraftResolved — a renderer running against an older
+    // preload keeps working without the retention signal instead of throwing on every mount.
+    onBrowserRemoteViewersChanged?: (
+      callback: (event: { browserPageId: string; hasRemoteViewers: boolean }) => void
     ) => () => void
     onClientHostedBrowserRowsChanged: (
       callback: (event: ClientHostedBrowserRowsEvent) => void

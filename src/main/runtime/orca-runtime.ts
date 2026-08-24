@@ -2278,6 +2278,9 @@ type RuntimeNotifier = {
     resolution: { text: string; createdAt: number }
   ): void
   browserDriverChanged?(browserPageId: string, driver: RuntimeBrowserDriverState): void
+  // Why: separate from the driver above because watching and driving are independent — a page can
+  // be watched by a desktop client with no driver at all, and that page must still paint.
+  browserRemoteViewersChanged?(browserPageId: string, hasRemoteViewers: boolean): void
   // Why: pages placed on a paired client never reach the host renderer's tab model, so the host
   // has no row for them unless main pushes one. Ephemeral and host-local — see
   // src/shared/client-hosted-browser-rows.ts.
@@ -3298,11 +3301,16 @@ export class OrcaRuntimeService {
   // deviceToken (multi-screen mobile).
   private subscriptionsByConnection = new Map<string, Set<string>>()
   private subscriptionConnectionByEntry = new Map<string, string>()
+  // Why: a connection record replaces whatever else that socket was streaming regardless of who
+  // is driving, so it deliberately carries no pairing scope.
   private activeBrowserScreencastsByConnection = new Map<
     string,
-    { cancel: (emitEnd?: boolean) => void; done: Promise<void>; connectionKey: string }
+    Omit<BrowserScreencastSubscriber, 'drivesAsMobile'>
   >()
   private activeBrowserScreencastsByPage = new Map<string, Set<BrowserScreencastSubscriber>>()
+  // Why: paint retention, not control — Chromium stops painting a display:none guest, so the host
+  // renderer must keep any page a remote client is watching mounted even when nobody drives it.
+  private browserRemoteViewerPages = new Set<string>()
   // Why: mobile clients subscribe to desktop notifications via
   // notifications.subscribe. This set enables fan-out — each connected
   // mobile client gets its own listener, and dispatchMobileNotification
@@ -15148,6 +15156,24 @@ export class OrcaRuntimeService {
       this.currentBrowserDriver.set(browserPageId, next)
     }
     this.notifier?.browserDriverChanged?.(browserPageId, next)
+  }
+
+  getBrowserRemoteViewerPages(): string[] {
+    return Array.from(this.browserRemoteViewerPages)
+  }
+
+  /** Republishes from the live subscriber set, so every add and remove has one settling point. */
+  private publishBrowserRemoteViewers(browserPageId: string): void {
+    const watched = (this.activeBrowserScreencastsByPage.get(browserPageId)?.size ?? 0) > 0
+    if (this.browserRemoteViewerPages.has(browserPageId) === watched) {
+      return
+    }
+    if (watched) {
+      this.browserRemoteViewerPages.add(browserPageId)
+    } else {
+      this.browserRemoteViewerPages.delete(browserPageId)
+    }
+    this.notifier?.browserRemoteViewersChanged?.(browserPageId, watched)
   }
 
   reclaimBrowserForDesktop(browserPageId: string): boolean {
@@ -38591,6 +38617,7 @@ export class OrcaRuntimeService {
         new Set<BrowserScreencastSubscriber>()
       pageStreams.add(activePageStream)
       this.activeBrowserScreencastsByPage.set(activeBrowserPageId, pageStreams)
+      this.publishBrowserRemoteViewers(activeBrowserPageId)
       if (drivesAsMobile) {
         this.setBrowserDriver(activeBrowserPageId, { kind: 'mobile', clientId: connectionKey })
       }
@@ -38630,6 +38657,7 @@ export class OrcaRuntimeService {
             this.activeBrowserScreencastsByPage.delete(activeBrowserPageId)
           }
         }
+        this.publishBrowserRemoteViewers(activeBrowserPageId)
         const driver = this.getBrowserDriver(activeBrowserPageId)
         if (driver.kind === 'mobile' && driver.clientId === connectionKey) {
           this.setBrowserDriver(

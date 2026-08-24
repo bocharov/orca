@@ -1,5 +1,12 @@
-import { describe, expect, it } from 'vitest'
-import { collectBrowserPageIds } from './browser-guest-paint-retention'
+// @vitest-environment happy-dom
+import { renderHook } from '@testing-library/react'
+import { afterEach, describe, expect, it } from 'vitest'
+import {
+  collectBrowserPageIds,
+  useBrowserGuestPaintRetention
+} from './browser-guest-paint-retention'
+import { hydrateBrowserDrivers } from '../../../lib/pane-manager/browser-mobile-driver-state'
+import { hydrateBrowserRemoteViewerPages } from '../../../lib/pane-manager/browser-remote-viewer-state'
 
 describe('collectBrowserPageIds', () => {
   it('prefers the full page list so every guest under a tab is covered', () => {
@@ -42,5 +49,37 @@ describe('collectBrowserPageIds', () => {
         { id: 'tab-2', pageIds: ['b', 'c'] }
       ])
     ).toEqual(['a', 'b', 'c'])
+  })
+})
+
+describe('useBrowserGuestPaintRetention', () => {
+  afterEach(() => {
+    hydrateBrowserDrivers([])
+    hydrateBrowserRemoteViewerPages([])
+  })
+
+  it('retains a hidden container for a phone driving one of its pages', () => {
+    hydrateBrowserDrivers([
+      { browserPageId: 'page-b', driver: { kind: 'mobile', clientId: 'phone-1' } }
+    ])
+    expect(
+      renderHook(() => useBrowserGuestPaintRetention(['page-a', 'page-b'])).result.current
+    ).toBe(true)
+  })
+
+  // Why: a paired desktop/web/CLI client never takes the presence lock, so the driver term above
+  // cannot cover it and its stream would go dark behind a hidden ancestor.
+  it('retains a hidden container for a page a paired client is watching', () => {
+    hydrateBrowserRemoteViewerPages(['page-b'])
+    expect(
+      renderHook(() => useBrowserGuestPaintRetention(['page-a', 'page-b'])).result.current
+    ).toBe(true)
+  })
+
+  it('releases a hidden container once nothing drives or watches its pages', () => {
+    hydrateBrowserRemoteViewerPages(['page-elsewhere'])
+    expect(
+      renderHook(() => useBrowserGuestPaintRetention(['page-a', 'page-b'])).result.current
+    ).toBe(false)
   })
 })
