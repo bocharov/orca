@@ -4,11 +4,14 @@ import {
 } from '../../../../shared/protocol-version'
 import { BrowserClientPageMetadataParams } from '../../../../shared/browser-client-page-metadata-protocol'
 import {
+  BROWSER_CLIENT_HOST_AUTHORITY_MISMATCH_CODE,
   BrowserClientHostAttachParams,
   BrowserClientHostCommandResultParams
 } from '../../../../shared/browser-client-host-protocol'
+import { BrowserError } from '../../../browser/browser-error'
 import { getBrowserHostLeaseRegistry } from '../../browser-host-lease-registry-instance'
 import { getRuntimeBrowserPageRegistry } from '../../runtime-browser-page-registry'
+import { adoptRuntimeBrowserClientPagesFromInventory } from '../../runtime-browser-client-page-adoption'
 import { recoverUnavailableRuntimeBrowserClientPages } from '../../runtime-browser-client-page-recovery'
 import { releaseRuntimeBrowserClientPageRecord } from '../../runtime-browser-client-page-release'
 import { defineMethod, defineStreamingMethod, type RpcAnyMethod } from '../core'
@@ -29,7 +32,10 @@ export const BROWSER_CLIENT_HOST_METHODS: RpcAnyMethod[] = [
         throw new Error('browser_client_host_capability_required')
       }
       if (params.authorityRuntimeId !== runtime.getRuntimeId()) {
-        throw new Error('browser_client_host_authority_mismatch')
+        throw new BrowserError(
+          BROWSER_CLIENT_HOST_AUTHORITY_MISMATCH_CODE,
+          BROWSER_CLIENT_HOST_AUTHORITY_MISMATCH_CODE
+        )
       }
 
       const registry = getBrowserHostLeaseRegistry(runtime)
@@ -99,6 +105,17 @@ export const BROWSER_CLIENT_HOST_METHODS: RpcAnyMethod[] = [
             emit
           )
         }
+        // Before recovery, which only reconciles pages this runtime already knows: a restart left
+        // the guests alive on the client but took the records with it.
+        await adoptRuntimeBrowserClientPagesFromInventory({
+          lease: handle.lease,
+          authority: registry,
+          pages: getRuntimeBrowserPageRegistry(runtime),
+          notifyWorkspace: (workspaceId) => runtime.notifyMobileSessionTabsChanged(workspaceId),
+          resolveExecutionHostKey: (workspaceId) =>
+            runtime.resolveBrowserExecutionHostKeyForWorkspace(workspaceId),
+          ...(signal ? { signal } : {})
+        })
         await recoverUnavailableRuntimeBrowserClientPages({
           lease: handle.lease,
           authority: registry,
@@ -142,7 +159,10 @@ export const BROWSER_CLIENT_HOST_METHODS: RpcAnyMethod[] = [
         throw new Error('browser_client_host_capability_required')
       }
       if (params.authorityRuntimeId !== runtime.getRuntimeId()) {
-        throw new Error('browser_client_host_authority_mismatch')
+        throw new BrowserError(
+          BROWSER_CLIENT_HOST_AUTHORITY_MISMATCH_CODE,
+          BROWSER_CLIENT_HOST_AUTHORITY_MISMATCH_CODE
+        )
       }
       const accepted = getBrowserHostLeaseRegistry(runtime).settleClientPageCommand(
         {

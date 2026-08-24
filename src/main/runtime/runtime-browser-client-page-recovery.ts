@@ -131,7 +131,8 @@ async function recoverPage(
     pairedDeviceId: options.lease.pairedDeviceId,
     browserProfileId: page.browserProfileId,
     executionHostKey: page.executionHostKey,
-    requiredCapabilities: [BROWSER_CLIENT_AUTOMATION_HOST_CAPABILITY]
+    requiredCapabilities: [BROWSER_CLIENT_AUTOMATION_HOST_CAPABILITY],
+    workspaceId: page.workspaceId
   })
   const recovered = options.pages.replaceClientPagePlacement(
     page.browserPageId,

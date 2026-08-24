@@ -23,6 +23,7 @@ export async function createBrowserHostClientPage(
     executionHostKey: string
     requiredCapabilities?: readonly string[]
     timeoutMs?: number
+    workspaceId?: string
   },
   dependencies: {
     selectLease(
@@ -63,7 +64,8 @@ export async function createBrowserHostClientPage(
     const command = {
       type: 'createPage' as const,
       browserProfileId: options.browserProfileId,
-      executionHostKey: options.executionHostKey
+      executionHostKey: options.executionHostKey,
+      ...(options.workspaceId ? { workspaceId: options.workspaceId } : {})
     }
     assertBrowserHostPageCommandAdmission(lease, command, (executionHostKey) =>
       state.executionHostGrants.require(executionHostKey)

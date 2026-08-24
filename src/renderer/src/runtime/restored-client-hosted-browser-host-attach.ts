@@ -22,29 +22,64 @@ export async function ensureBrowserClientHostsForRestoredPages(
   state: RestoredBrowserHandleSource
 ): Promise<void> {
   for (const environmentId of restoredClientHostEnvironmentIds(state)) {
-    if (preparingEnvironmentIds.has(environmentId)) {
-      continue
-    }
-    preparingEnvironmentIds.add(environmentId)
-    try {
-      // Idempotent per environment: the registry returns the live lease when one is already up, and
-      // reserves no per-page state, so this only claims hosting duty.
-      await window.api.runtimeEnvironments.prepareBrowserClientHostPlacement({
-        selector: environmentId,
-        preference: 'auto'
-      })
-    } catch (error) {
-      // Why swallowed: this runs inside the startup chain, where a throw aborts hydration and boots
-      // the app in degraded no-save mode. A page nobody hosts is recoverable; a lost session is not.
-      console.warn(
-        '[restored-client-hosted-browser] failed to start the browser client host for',
-        environmentId,
-        error
-      )
-    } finally {
-      preparingEnvironmentIds.delete(environmentId)
-    }
+    await prepareBrowserClientHost(environmentId)
   }
+}
+
+/**
+ * Re-claims hosting duty after the runtime process restarted under a new id.
+ *
+ * The guests are still alive in this desktop's webviews, but the runtime that placed them is gone
+ * and the replacement knows nothing about them. Preparing again drives the host registry down its
+ * `replaceAuthority` path, which keeps the guests and re-attaches with a page inventory the new
+ * runtime can adopt. Without this nothing observes the id change and the rows are simply lost.
+ */
+export async function ensureBrowserClientHostForRestartedRuntime(
+  state: RestoredBrowserHandleSource,
+  environmentId: string
+): Promise<void> {
+  if (!hasLiveClientHostedPage(state, environmentId)) {
+    return
+  }
+  await prepareBrowserClientHost(environmentId)
+}
+
+async function prepareBrowserClientHost(environmentId: string): Promise<void> {
+  if (preparingEnvironmentIds.has(environmentId)) {
+    return
+  }
+  preparingEnvironmentIds.add(environmentId)
+  try {
+    // Idempotent per environment: the registry returns the live lease when one is already up, and
+    // reserves no per-page state, so this only claims hosting duty.
+    await window.api.runtimeEnvironments.prepareBrowserClientHostPlacement({
+      selector: environmentId,
+      preference: 'auto'
+    })
+  } catch (error) {
+    // Why swallowed: this runs inside the startup chain, where a throw aborts hydration and boots
+    // the app in degraded no-save mode. A page nobody hosts is recoverable; a lost session is not.
+    console.warn(
+      '[restored-client-hosted-browser] failed to start the browser client host for',
+      environmentId,
+      error
+    )
+  } finally {
+    preparingEnvironmentIds.delete(environmentId)
+  }
+}
+
+function hasLiveClientHostedPage(
+  state: RestoredBrowserHandleSource,
+  environmentId: string
+): boolean {
+  return Object.values(state.remoteBrowserPageHandlesByPageId ?? {}).some(
+    (handle) =>
+      handle.environmentId === environmentId &&
+      (handle.placement?.kind === 'client' ||
+        handle.stagedClientHosted === true ||
+        handle.restoredClientHosted === true)
+  )
 }
 
 function restoredClientHostEnvironmentIds(state: RestoredBrowserHandleSource): string[] {

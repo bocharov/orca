@@ -669,6 +669,8 @@ import {
   type ClientHostedBrowserRpcRoute
 } from './runtime-browser-client-automation'
 import { resolveRuntimeBrowserNetworkExecutionHost } from './runtime-browser-network-execution-host'
+import { browserNetworkExecutionHostKey } from '../browser/browser-network-execution-route'
+import type { BrowserNetworkExecutionHost } from '../../shared/browser-client-host-protocol'
 import { sameRuntimeBrowserPlacement } from '../../shared/runtime-browser-placement'
 import { RemoteRuntimeTerminalCreateIdempotency } from './remote-runtime-terminal-create-idempotency'
 import { deriveRemoteRuntimeTerminalCreateHandle } from './remote-runtime-terminal-create-identity'
@@ -31363,6 +31365,54 @@ export class OrcaRuntimeService {
       : this.resolveWorktreeSelector(selector)
   }
 
+  /**
+   * The execution-host key a client-hosted page in this workspace would be created under now.
+   *
+   * Adoption cannot reuse the key an inventory entry reports: native and WSL keys name the runtime
+   * that minted them, so a restart always invalidates them. Returns undefined when the workspace is
+   * gone, which is also the signal that its pages have nothing left to be restored into.
+   */
+  async resolveBrowserExecutionHostKeyForWorkspace(
+    workspaceId: string
+  ): Promise<string | undefined> {
+    try {
+      const worktree = await this.resolveBrowserWorkspace(`id:${workspaceId}`)
+      return browserNetworkExecutionHostKey(
+        await this.resolveBrowserNetworkExecutionHostForWorktree(worktree)
+      )
+    } catch {
+      return undefined
+    }
+  }
+
+  private resolveBrowserNetworkExecutionHostForWorktree(worktree?: {
+    id: string
+    repoId?: string
+    hostId?: ExecutionHostId
+  }): BrowserNetworkExecutionHost | Promise<BrowserNetworkExecutionHost> {
+    const repo = worktree?.repoId ? this.requireStore().getRepo(worktree.repoId) : undefined
+    const executionHostId = worktree
+      ? getWorktreeExecutionHostId(worktree, repo)
+      : LOCAL_EXECUTION_HOST_ID
+    const parsedHost = parseExecutionHostId(executionHostId)
+    return resolveRuntimeBrowserNetworkExecutionHost({
+      runtimeId: this.getRuntimeId(),
+      runtimeRevision: this.getStartedAt(),
+      executionHostId,
+      ...(worktree
+        ? {
+            projectRuntime: resolveLocalProjectRuntimeForWorktreeId(
+              this.requireStore(),
+              worktree.id
+            )
+          }
+        : {}),
+      ...(parsedHost?.kind === 'ssh'
+        ? { sshState: getRegisteredSshState(parsedHost.targetId) }
+        : {})
+    })
+  }
+
   private async resolveEmulatorCleanupWorkspaceId(selector: string): Promise<string> {
     const workspaceSelector = selector.startsWith('id:') ? selector.slice(3) : selector
     const parsed = parseWorkspaceKey(workspaceSelector)
@@ -38334,29 +38384,8 @@ export class OrcaRuntimeService {
     resolveBrowserWorkspace: (selector) => this.resolveBrowserWorkspace(selector),
     getBrowserHostLeaseRegistry: () => getBrowserHostLeaseRegistry(this),
     getRuntimeBrowserPageRegistry: () => getRuntimeBrowserPageRegistry(this),
-    resolveBrowserNetworkExecutionHost: (worktree) => {
-      const repo = worktree?.repoId ? this.requireStore().getRepo(worktree.repoId) : undefined
-      const executionHostId = worktree
-        ? getWorktreeExecutionHostId(worktree, repo)
-        : LOCAL_EXECUTION_HOST_ID
-      const parsedHost = parseExecutionHostId(executionHostId)
-      return resolveRuntimeBrowserNetworkExecutionHost({
-        runtimeId: this.getRuntimeId(),
-        runtimeRevision: this.getStartedAt(),
-        executionHostId,
-        ...(worktree
-          ? {
-              projectRuntime: resolveLocalProjectRuntimeForWorktreeId(
-                this.requireStore(),
-                worktree.id
-              )
-            }
-          : {}),
-        ...(parsedHost?.kind === 'ssh'
-          ? { sshState: getRegisteredSshState(parsedHost.targetId) }
-          : {})
-      })
-    },
+    resolveBrowserNetworkExecutionHost: (worktree) =>
+      this.resolveBrowserNetworkExecutionHostForWorktree(worktree),
     getAuthoritativeWindow: () => this.getAuthoritativeWindow(),
     getAvailableAuthoritativeWindow: () => this.getAvailableAuthoritativeWindow(),
     getOffscreenBrowserBackend: () => this.offscreenBrowserBackend,

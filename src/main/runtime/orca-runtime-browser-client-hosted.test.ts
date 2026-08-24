@@ -184,7 +184,9 @@ describe('RuntimeBrowserCommands client-hosted routing', () => {
       pairedDeviceId: 'device-a',
       browserProfileId: 'default',
       executionHostKey: JSON.stringify(['native', 'runtime-a', 7]),
-      requiredCapabilities: ['automation-v1']
+      requiredCapabilities: ['automation-v1'],
+      // Carried to the client so its page inventory can name the workspace after a restart.
+      workspaceId: 'wt-1'
     })
     expect(issueClientPageCommand).toHaveBeenCalledWith(
       expect.objectContaining({ browserPageId: 'page-stable' }),
