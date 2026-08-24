@@ -2,12 +2,16 @@
  *
  * Every surface that can swallow the document pointer stream enrols here — the local
  * pane's registered <webview> and the client-hosted page's body-level retained host —
- * so one acquire covers all of them and a surface enrolled mid-drag comes up already
- * transparent. Acquires are reference counted: tab drags and terminal pane drags can
- * overlap, and passthrough must outlive whichever releases first.
+ * so one acquire covers all of them. Acquires are reference counted: tab drags and
+ * terminal pane drags can overlap, and passthrough must outlive whichever releases first.
+ *
+ * Enrolment does not settle the new surface: a guest that appears mid-drag is put in
+ * passthrough by the path that makes it hittable in the first place (a local webview by
+ * its registration, a retained host by its show), so doing it here too would be a second
+ * writer with no state of its own to observe.
  */
 
-/** Called with the passthrough state whenever it changes, and once on enrolment. */
+/** Called with the passthrough state whenever it changes. */
 export type WebviewDragPassthroughSurface = (passthrough: boolean) => void
 
 const passthroughTokens = new Set<symbol>()
@@ -17,22 +21,13 @@ export function isWebviewDragPassthroughActive(): boolean {
   return passthroughTokens.size > 0
 }
 
-export function subscribeToWebviewDragPassthrough(
+export function registerWebviewDragPassthroughSurface(
   surface: WebviewDragPassthroughSurface
 ): () => void {
   passthroughSurfaces.add(surface)
   return () => {
     passthroughSurfaces.delete(surface)
   }
-}
-
-/** Enrols a guest surface and immediately settles it into any drag already in flight. */
-export function registerWebviewDragPassthroughSurface(
-  surface: WebviewDragPassthroughSurface
-): () => void {
-  const unsubscribe = subscribeToWebviewDragPassthrough(surface)
-  surface(isWebviewDragPassthroughActive())
-  return unsubscribe
 }
 
 function notifyWebviewDragPassthroughSurfaces(): void {

@@ -75,8 +75,8 @@ function applyRetainedHostPointerEvents(
 }
 
 /** Enrols a retained host in the shared guest passthrough set, so a drag reaches the document
- *  through this body-level overlay the way it already does through local pane guests. Call after
- *  the page's fields are in place: enrolment reads its visibility immediately. */
+ *  through this body-level overlay the way it already does through local pane guests. A host
+ *  enrolled mid-drag needs no settling: it is created hidden, and its show derives the state. */
 export function enrolRetainedHostDragPassthrough(page: RetainedPage): () => void {
   return registerWebviewDragPassthroughSurface((passthrough) => {
     applyRetainedHostPointerEvents(page.host, page.visibleAttachment !== null, passthrough)

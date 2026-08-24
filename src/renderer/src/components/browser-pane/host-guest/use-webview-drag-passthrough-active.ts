@@ -1,11 +1,11 @@
 import { useSyncExternalStore } from 'react'
 import {
   isWebviewDragPassthroughActive,
-  subscribeToWebviewDragPassthrough
+  registerWebviewDragPassthroughSurface
 } from './webview-drag-passthrough'
 
 function subscribe(onStoreChange: () => void): () => void {
-  return subscribeToWebviewDragPassthrough(onStoreChange)
+  return registerWebviewDragPassthroughSurface(onStoreChange)
 }
 
 /** Whether a renderer-owned drag currently holds guests click-through. Panes read it to keep
