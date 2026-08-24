@@ -29,6 +29,7 @@ import { useWebviewGuestFocus } from './assemble-chrome/browser-page-guest-focus
 import { RemoteRuntimeEgressIndicator } from './assemble-chrome/browser-egress-indicator'
 import { getBrowserPageZoomIndicatorState } from './host-guest/browser-page-zoom'
 import { useBrowserPageWebviewShortcuts } from './host-guest/use-browser-page-webview-shortcuts'
+import { useWebviewDragPassthroughActive } from './host-guest/use-webview-drag-passthrough-active'
 import { useBrowserPageZoomFeedback } from './host-guest/use-browser-page-zoom-feedback'
 import { BrowserLoadFailureOverlay } from './navigate/browser-load-failure-overlay'
 import { resolveBrowserAddressBarSubmission } from './navigate/browser-address-bar-navigation'
@@ -111,6 +112,7 @@ export function ClientHostedBrowserPagePane({
     }
   }, [browserTab.id, isActive, onUpdatePageState])
 
+  const dragPassthroughActive = useWebviewDragPassthroughActive()
   const guestFocus = useWebviewGuestFocus(webviewRef)
   const { keepAddressBarFocusRef, startAddressBarFocusGrab } = useBrowserPageChromeFocus({
     browserTabId: browserTab.id,
@@ -323,10 +325,13 @@ export function ClientHostedBrowserPagePane({
 
   useEffect(() => {
     // Why: a new blank tab is claiming the address bar; focusing the guest here would yank it straight back.
-    if (isActive && !keepAddressBarFocusRef.current) {
+    // Why the drag gate: a tab drag preview-activates whatever it hovers, and focusing the guest hands
+    // focus to another WebContents — the embedder blur that follows reads as an aborted drag. The flag
+    // is reactive, so the guest still gets focus once the drag that raised it ends.
+    if (isActive && !dragPassthroughActive && !keepAddressBarFocusRef.current) {
       webviewRef.current?.focus()
     }
-  }, [isActive, keepAddressBarFocusRef])
+  }, [dragPassthroughActive, isActive, keepAddressBarFocusRef])
 
   const showFailureOverlay = !attachmentError && Boolean(browserTab.loadError)
   // Why: the failure is about the URL that failed, not whatever page is still loaded — feeding
