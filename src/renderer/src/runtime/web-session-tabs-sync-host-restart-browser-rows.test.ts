@@ -5,6 +5,7 @@ import {
   type RuntimeMobileSessionTabsResult
 } from '../../../shared/runtime-types'
 import type { Tab } from '../../../shared/tab-types'
+import { hostSnapshotAffirmsWorktreeContents } from './host-session-snapshot-authority'
 import { applyWebSessionTabsSnapshot, type WebSessionTabsSyncState } from './web-session-tabs-sync'
 import {
   ENV,
@@ -170,5 +171,67 @@ describe('client-hosted browser rows across a host restart', () => {
 
     expect(next.browserTabsByWorktree[WT]).toBeUndefined()
     expect(next.remoteBrowserPageHandlesByPageId[PAGE_ID]).toBeUndefined()
+  })
+})
+
+describe('reading whether a snapshot answers for a worktree', () => {
+  // Pinned to the literal, not the constant: this string is the wire contract with hosts that
+  // predate the constant, and a test written against the constant moves with it.
+  it('treats the placeholder epoch at version zero as no answer', () => {
+    expect(UNPUBLISHED_WORKTREE_PUBLICATION_EPOCH).toBe('none')
+    expect(
+      hostSnapshotAffirmsWorktreeContents({ publicationEpoch: 'none', snapshotVersion: 0 })
+    ).toBe(false)
+  })
+
+  // Both halves are load-bearing: a published worktree can legitimately sit at version zero, and
+  // only the placeholder epoch marks a frame the runtime synthesized without consulting anything.
+  it('answers for a real epoch even at version zero', () => {
+    expect(
+      hostSnapshotAffirmsWorktreeContents({ publicationEpoch: 'headless:abc', snapshotVersion: 0 })
+    ).toBe(true)
+  })
+
+  it('answers for the placeholder epoch once it carries a version', () => {
+    expect(
+      hostSnapshotAffirmsWorktreeContents({ publicationEpoch: 'none', snapshotVersion: 1 })
+    ).toBe(true)
+  })
+})
+
+describe('scoping the carve-out to this environment', () => {
+  const OTHER_ENV_PAGE_ID = 'other-env-page'
+
+  /** A workspace holding a page of this environment plus one hosted for a different one. */
+  function mixedEnvironmentState(): WebSessionTabsSyncState {
+    const state = adoptedState(SERVER_PLACEMENT)
+    return {
+      ...state,
+      browserTabsByWorktree: {
+        [WT]: [{ ...hostedWorkspace(), pageIds: [PAGE_ID, OTHER_ENV_PAGE_ID] }]
+      },
+      browserPagesByWorkspace: {
+        [WORKSPACE_ID]: [
+          hostedPage(),
+          { ...hostedPage(), id: OTHER_ENV_PAGE_ID, browserRuntimeEnvironmentId: 'env-other' }
+        ]
+      },
+      remoteBrowserPageHandlesByPageId: {
+        ...state.remoteBrowserPageHandlesByPageId,
+        [OTHER_ENV_PAGE_ID]: {
+          environmentId: 'env-other',
+          remotePageId: 'remote-other',
+          placement: CLIENT_PLACEMENT
+        }
+      }
+    }
+  }
+
+  // Why: the carve-out asks whether THIS desktop hosts a page of the environment that is speaking.
+  // A guest hosted for some other environment says nothing about this one's silence.
+  it('does not let a page of another environment hold the row', () => {
+    const next = applyToState(mixedEnvironmentState(), unpublishedWorktreeSnapshot())
+
+    expect(next.browserTabsByWorktree[WT]).toBeUndefined()
   })
 })
