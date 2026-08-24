@@ -4,9 +4,13 @@ import {
   resetRestoredBrowserClientHostAttachForTests
 } from './restored-client-hosted-browser-host-attach'
 
-const prepareBrowserClientHostPlacement = vi.fn(async (_args: { selector: string }) => ({
-  kind: 'server' as const
-}))
+type Placement = { kind: 'client'; browserHostClientId: string } | { kind: 'server' }
+
+const CLIENT_PLACEMENT: Placement = { kind: 'client', browserHostClientId: 'browser-host-1' }
+
+const prepareBrowserClientHostPlacement = vi.fn(
+  async (_args: { selector: string }): Promise<Placement> => CLIENT_PLACEMENT
+)
 
 function handles(
   entries: Record<string, { environmentId: string; clientHosted?: true }>
@@ -34,7 +38,7 @@ describe('ensureBrowserClientHostsForRestoredPages', () => {
   beforeEach(() => {
     resetRestoredBrowserClientHostAttachForTests()
     prepareBrowserClientHostPlacement.mockClear()
-    prepareBrowserClientHostPlacement.mockResolvedValue({ kind: 'server' as const })
+    prepareBrowserClientHostPlacement.mockResolvedValue(CLIENT_PLACEMENT)
     vi.stubGlobal('window', {
       api: { runtimeEnvironments: { prepareBrowserClientHostPlacement } }
     })
@@ -96,7 +100,7 @@ describe('ensureBrowserClientHostsForRestoredPages', () => {
   it('does not stack a second preparation on top of one still in flight', async () => {
     let settle = (): void => {}
     prepareBrowserClientHostPlacement.mockImplementation(
-      () => new Promise((resolve) => (settle = () => resolve({ kind: 'server' as const })))
+      () => new Promise((resolve) => (settle = () => resolve(CLIENT_PLACEMENT)))
     )
     const restored = handles({ 'page-1': { environmentId: 'env-1', clientHosted: true } })
 
@@ -119,6 +123,20 @@ describe('ensureBrowserClientHostsForRestoredPages', () => {
 
     expect(preparedEnvironmentIds()).toEqual(['env-1'])
     expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  // Why: preparation resolves to server placement when the probe cannot answer instead of
+  // throwing, so this is the only thing that reports a relaunch whose pages never come back.
+  it('warns when preparation answers server placement for pages this desktop was hosting', async () => {
+    prepareBrowserClientHostPlacement.mockResolvedValue({ kind: 'server' })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    await ensureBrowserClientHostsForRestoredPages(
+      handles({ 'page-1': { environmentId: 'env-1', clientHosted: true } })
+    )
+
+    expect(warn).toHaveBeenCalledWith(expect.any(String), 'server', 'for', 'env-1')
     warn.mockRestore()
   })
 

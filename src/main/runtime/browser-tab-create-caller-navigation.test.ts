@@ -4,6 +4,10 @@
  * client jumped to a tab someone else opened.
  */
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  RUNTIME_NAVIGATION_TARGETS,
+  type RuntimeNavigationTarget
+} from '../../shared/runtime-navigation'
 import type { RuntimeMobileSessionTabsResult } from '../../shared/runtime-types'
 import type { WorkspaceSessionState } from '../../shared/workspace-session-state-types'
 import { OrcaRuntimeService } from './orca-runtime'
@@ -157,9 +161,22 @@ async function seedSelections(runtime: OrcaRuntimeService): Promise<void> {
   })
 }
 
+/**
+ * The three surfaces a create can move — the shared snapshot the host desktop's rows read, the
+ * caller's own projection, and a second device's — for every target `browser.tabCreate` accepts.
+ * No first-party client sends 'host' or 'clients' today, but the schema takes all four from any
+ * paired client, and each names a different set of screens that may be moved.
+ */
+const CREATE_NAVIGATION_OUTCOMES = {
+  caller: { shared: 'page-old', caller: 'page-new', bystander: 'page-alt' },
+  host: { shared: 'page-new', caller: 'page-new', bystander: 'page-alt' },
+  clients: { shared: 'page-old', caller: 'page-new', bystander: 'page-new' },
+  all: { shared: 'page-new', caller: 'page-new', bystander: 'page-new' }
+} satisfies Record<RuntimeNavigationTarget, { shared: string; caller: string; bystander: string }>
+
 function createBrowserTab(
   runtime: OrcaRuntimeService,
-  params: { navigation?: 'caller' | 'all' } = {}
+  params: { navigation?: RuntimeNavigationTarget } = {}
 ): Promise<{ browserPageId: string }> {
   return runtime.browserTabCreate(
     {
@@ -187,21 +204,26 @@ describe('browser.tabCreate caller navigation', () => {
     return () => vi.useRealTimers()
   })
 
-  it('selects the new tab for the originating device only', async () => {
-    const { runtime, caller, bystander, sharedActiveTabId } = createPairedRuntime()
-    await seedSelections(runtime)
-    expect(sharedActiveTabId()).toBe('page-old')
-    expect(bystander.at(-1)?.activeTabId).toBe('page-alt')
+  // The reported defect was the server's own UI switching to the tab a client created; the other
+  // half is a second paired device steered off the page it was reading. Which of the two a target
+  // is allowed to move is the whole contract, so every target asserts both plus the caller.
+  it.each(RUNTIME_NAVIGATION_TARGETS)(
+    'moves only the screens a %s create addresses',
+    async (navigation) => {
+      const expected = CREATE_NAVIGATION_OUTCOMES[navigation]
+      const { runtime, caller, bystander, sharedActiveTabId } = createPairedRuntime()
+      await seedSelections(runtime)
+      expect(sharedActiveTabId()).toBe('page-old')
+      expect(bystander.at(-1)?.activeTabId).toBe('page-alt')
 
-    await createBrowserTab(runtime, { navigation: 'caller' })
-    vi.advanceTimersByTime(300)
+      await createBrowserTab(runtime, { navigation })
+      vi.advanceTimersByTime(300)
 
-    // The reported defect: the server's own UI switched to the tab the client created.
-    expect(sharedActiveTabId()).toBe('page-old')
-    // The other half of it: a second paired device is steered off the page it was reading.
-    expect(bystander.at(-1)?.activeTabId).toBe('page-alt')
-    expect(caller.at(-1)?.activeTabId).toBe('page-new')
-  })
+      expect(sharedActiveTabId()).toBe(expected.shared)
+      expect(caller.at(-1)?.activeTabId).toBe(expected.caller)
+      expect(bystander.at(-1)?.activeTabId).toBe(expected.bystander)
+    }
+  )
 
   it('defaults an origin-less paired create to caller-local selection', async () => {
     const { runtime, caller, bystander, sharedActiveTabId } = createPairedRuntime()
@@ -214,19 +236,6 @@ describe('browser.tabCreate caller navigation', () => {
     expect(sharedActiveTabId()).toBe('page-old')
     expect(bystander.at(-1)?.activeTabId).toBe('page-alt')
     expect(caller.at(-1)?.activeTabId).toBe('page-new')
-  })
-
-  it('still lets an explicit all-device create steer every screen', async () => {
-    const { runtime, caller, bystander, sharedActiveTabId } = createPairedRuntime()
-    await seedSelections(runtime)
-
-    await createBrowserTab(runtime, { navigation: 'all' })
-    vi.advanceTimersByTime(300)
-
-    expect(caller.at(-1)?.activeTabId).toBe('page-new')
-    expect(sharedActiveTabId()).toBe('page-new')
-    // 'all' is the one target that may overrule a device's private selection.
-    expect(bystander.at(-1)?.activeTabId).toBe('page-new')
   })
 
   it('leaves paired devices where they were when the host creates a tab locally', async () => {

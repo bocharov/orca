@@ -154,6 +154,30 @@ describe('runtime environment browser client host handler', () => {
     expect(startHostMock).not.toHaveBeenCalled()
   })
 
+  // Why this guard carries the case alone now: a probe that cannot answer resolves to server
+  // placement instead of throwing, so nothing else notices that the user detached the runtime
+  // while it was in flight.
+  it('rejects a manual disconnect that lands while the probe is in flight', async () => {
+    getRuntimeEnvironmentStatusMock.mockImplementation(async () => {
+      manuallyDisconnectedMock.mockReturnValue(true)
+      return {
+        id: 'status.get',
+        ok: false,
+        error: { code: 'runtime_unavailable', message: 'disconnected mid-probe' },
+        _meta: { runtimeId: 'runtime-a' }
+      }
+    })
+    register(true)
+    const prepare = handler<{ selector: string }, unknown>(
+      'runtimeEnvironments:prepareBrowserClientHostPlacement'
+    )
+
+    await expect(prepare(null, { selector: 'environment-a' })).rejects.toThrow(
+      'runtime_manually_disconnected'
+    )
+    expect(startHostMock).not.toHaveBeenCalled()
+  })
+
   it('rejects manual disconnect before probing or attaching', async () => {
     manuallyDisconnectedMock.mockReturnValue(true)
     register(true)
