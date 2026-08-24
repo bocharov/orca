@@ -89,10 +89,12 @@ import {
   type ScreencastSubscriberDeliveryState
 } from './browser-screencast-ghost-subscriber-eviction'
 import {
-  browserTabCreateClientPageStartsActive,
   publishCreatedBrowserSessionTab,
-  publishSwitchedBrowserSessionTab
+  publishSwitchedBrowserSessionTab,
+  resolveBrowserTabCreateFocus,
+  type BrowserSessionTabSelectionOptions
 } from './browser-tab-create-publication'
+import type { RuntimeNavigationTarget } from '../../shared/runtime-navigation'
 import type { BrowserHostLeaseRegistry } from './browser-host-lease-registry'
 import {
   closeRuntimeBrowserClientPage,
@@ -266,7 +268,7 @@ export type RuntimeBrowserCommandHost = {
   markHeadlessBrowserSessionTabActive?(
     worktreeId: string | undefined,
     browserPageId: string,
-    targetGroupId?: string
+    options?: BrowserSessionTabSelectionOptions
   ): void
   notifyHeadlessBrowserSessionTabsChanged?(worktreeId: string): void
   retireRuntimeOwnedBrowserSessionTab?(worktreeId: string, browserPageId: string): void
@@ -1547,12 +1549,18 @@ export class RuntimeBrowserCommands {
       profileId?: string
       waitForRegistration?: boolean
       activate?: boolean
+      navigation?: RuntimeNavigationTarget
       targetGroupId?: string
       placement?: BrowserPageCreationPlacement
     },
-    caller?: { pairedDeviceId?: string }
+    caller?: { pairedDeviceId?: string; clientKind?: 'mobile' | 'runtime' }
   ): Promise<{ browserPageId: string }> {
     const url = params.url ?? 'about:blank'
+    const focus = resolveBrowserTabCreateFocus({
+      activate: params.activate,
+      navigation: params.navigation,
+      clientKind: caller?.clientKind
+    })
     const worktree = params.worktree
       ? params.placement?.kind === 'client'
         ? await this.host.resolveBrowserWorkspace(params.worktree)
@@ -1601,13 +1609,14 @@ export class RuntimeBrowserCommands {
         pairedDeviceId: caller.pairedDeviceId,
         url: 'about:blank',
         loading: url !== 'about:blank',
-        active: browserTabCreateClientPageStartsActive(params.activate)
+        active: focus.startsActive
       })
       publishCreatedBrowserSessionTab(this.host, {
         placementKind: 'client',
         browserPageId,
         worktreeId: worktree.id,
-        activate: params.activate,
+        focus,
+        clientNavigationId: caller.pairedDeviceId,
         targetGroupId: params.targetGroupId
       })
       if (url !== 'about:blank') {
@@ -1642,7 +1651,8 @@ export class RuntimeBrowserCommands {
         placementKind: 'offscreen',
         browserPageId: created.browserPageId,
         worktreeId,
-        activate: params.activate,
+        focus,
+        ...(caller?.pairedDeviceId ? { clientNavigationId: caller.pairedDeviceId } : {}),
         targetGroupId: params.targetGroupId
       })
       return { browserPageId: created.browserPageId }
@@ -1652,7 +1662,7 @@ export class RuntimeBrowserCommands {
       worktreeId,
       params.profileId,
       params.profileId ? sessionPartition : undefined,
-      params.activate,
+      focus.focusesHost,
       params.page
     )
 
@@ -1670,7 +1680,8 @@ export class RuntimeBrowserCommands {
       placementKind: 'renderer',
       browserPageId,
       worktreeId,
-      activate: params.activate,
+      focus,
+      ...(caller?.pairedDeviceId ? { clientNavigationId: caller.pairedDeviceId } : {}),
       targetGroupId: params.targetGroupId
     })
 

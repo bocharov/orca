@@ -1,4 +1,9 @@
 import type { AgentBrowserBridge } from '../browser/agent-browser-bridge'
+import {
+  navigationTargetsHost,
+  resolveRuntimeNavigationTarget,
+  type RuntimeNavigationTarget
+} from '../../shared/runtime-navigation'
 
 // The surfaces that can back a newly created browser page. Every one of them
 // publishes the created tab through publishCreatedBrowserSessionTab.
@@ -20,16 +25,33 @@ export type BrowserTabCreatePublicationHost = {
   markHeadlessBrowserSessionTabActive?(
     worktreeId: string | undefined,
     browserPageId: string,
-    targetGroupId?: string
+    options: BrowserSessionTabSelectionOptions
   ): void
   notifyHeadlessBrowserSessionTabsChanged?(worktreeId: string): void
+}
+
+export type BrowserSessionTabSelectionOptions = {
+  targetGroupId?: string
+  /**
+   * false leaves the shared snapshot's active tab alone; only the caller's own selection moves.
+   * Required, not defaulted: a default here is a branch no caller exercises, and getting it wrong
+   * silently decides whose screen moves.
+   */
+  focusesHost: boolean
+  /**
+   * The paired device that asked for the tab, and how far its selection reaches. Absent for a
+   * local create. The two travel together because neither means anything alone — separately, the
+   * runtime had to default a navigation target that could never actually be missing.
+   */
+  caller?: { clientNavigationId: string; navigation: RuntimeNavigationTarget }
 }
 
 export type BrowserTabCreatePublication = {
   placementKind: BrowserTabCreatePlacementKind
   browserPageId: string
   worktreeId?: string
-  activate?: boolean
+  focus: BrowserTabCreateFocusResolution
+  clientNavigationId?: string
   targetGroupId?: string
 }
 
@@ -88,6 +110,43 @@ export const BROWSER_TAB_CREATE_PUBLICATION_RULES: Record<
 // client onto the new tab. The marker is also what moves the tab into the clicked split group.
 export function browserTabCreateTakesFocus(activate: boolean | undefined): boolean {
   return activate === true
+}
+
+/** How far a create's selection reaches: the caller's own screen, the host's, or every device. */
+export type BrowserTabCreateFocusResolution = {
+  navigation: RuntimeNavigationTarget
+  /** The caller wants the new tab selected somewhere — the precondition for every step below. */
+  selects: boolean
+  /** The host desktop's own tab row follows the create. */
+  focusesHost: boolean
+  /** A client-placed page becomes its workspace's current page in the runtime page registry. */
+  startsActive: boolean
+}
+
+/**
+ * Split `activate` — historically "select this tab, everywhere" — into who selects and who follows.
+ *
+ * Why: `browser.tabCreate` carried no origin, so a create from one paired device moved the tab the
+ * host desktop and every other client were looking at. `navigation` names the audience; an absent
+ * value from a paired caller means 'caller', matching session.tabs.createTerminal. A local create
+ * (no paired caller, no navigation) still resolves to 'all', so the host keeps focusing its own.
+ */
+export function resolveBrowserTabCreateFocus(request: {
+  activate?: boolean
+  navigation?: RuntimeNavigationTarget
+  clientKind?: 'mobile' | 'runtime'
+}): BrowserTabCreateFocusResolution {
+  const navigation = resolveRuntimeNavigationTarget({
+    navigation: request.navigation,
+    clientKind: request.clientKind
+  })
+  const selects = browserTabCreateTakesFocus(request.activate)
+  return {
+    navigation,
+    selects,
+    focusesHost: selects && navigationTargetsHost(navigation),
+    startsActive: browserTabCreateClientPageStartsActive(request.activate)
+  }
 }
 
 // Why: a client page becomes its workspace's active registry page unless the caller opts out.
@@ -150,7 +209,11 @@ export function publishSwitchedBrowserSessionTab(
     host.notifyHeadlessBrowserSessionTabsChanged?.(publication.worktreeId)
   }
   if (rules.marksSessionTabFocus && browserTabSwitchTakesFocus(publication.focus)) {
-    host.markHeadlessBrowserSessionTabActive?.(publication.worktreeId, publication.browserPageId)
+    // Why unconditionally host-facing: an explicit switch carries no navigation target yet, so it
+    // keeps steering every screen exactly as it did before create learned to stay local.
+    host.markHeadlessBrowserSessionTabActive?.(publication.worktreeId, publication.browserPageId, {
+      focusesHost: true
+    })
   }
 }
 
@@ -171,11 +234,22 @@ export function publishCreatedBrowserSessionTab(
       bridge.setActiveTab(webContentsId, publication.worktreeId)
     }
   }
-  if (rules.marksSessionTabFocus && browserTabCreateTakesFocus(publication.activate)) {
-    host.markHeadlessBrowserSessionTabActive?.(
-      publication.worktreeId,
-      publication.browserPageId,
-      publication.targetGroupId
-    )
+  // Why `selects` and not `focusesHost`: a caller-local create still has to land the tab in the
+  // group whose "+" was clicked, and this is the only call that moves it there.
+  if (rules.marksSessionTabFocus && publication.focus.selects) {
+    host.markHeadlessBrowserSessionTabActive?.(publication.worktreeId, publication.browserPageId, {
+      ...(publication.targetGroupId !== undefined
+        ? { targetGroupId: publication.targetGroupId }
+        : {}),
+      focusesHost: publication.focus.focusesHost,
+      ...(publication.clientNavigationId !== undefined
+        ? {
+            caller: {
+              clientNavigationId: publication.clientNavigationId,
+              navigation: publication.focus.navigation
+            }
+          }
+        : {})
+    })
   }
 }

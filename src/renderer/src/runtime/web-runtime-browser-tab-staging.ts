@@ -144,6 +144,31 @@ export function rehomeStagedWebRuntimeBrowserTab(
 }
 
 /**
+ * Re-mark a staged tab once the live placement is known. Staging has to predict client hosting from
+ * the renderer's cached runtime status, which can lag a runtime upgrade; without this the pane would
+ * mount the component the stale verdict chose and swap only after adoption.
+ */
+export function restageWebRuntimeBrowserTabHostingIntent(
+  staged: StagedWebRuntimeBrowserTab,
+  args: { environmentId: string; remotePageId: string; clientHosted: boolean }
+): StagedWebRuntimeBrowserTab {
+  if (staged.clientHosted === args.clientHosted) {
+    return staged
+  }
+  const state = useAppStore.getState()
+  if (state.remoteBrowserPageHandlesByPageId[staged.pageId]?.staged !== true) {
+    return staged
+  }
+  state.setRemoteBrowserPageHandle(staged.pageId, {
+    environmentId: args.environmentId,
+    remotePageId: args.remotePageId,
+    staged: true,
+    ...(args.clientHosted ? { stagedClientHosted: true } : {})
+  })
+  return { ...staged, clientHosted: args.clientHosted }
+}
+
+/**
  * Remove a staged tab that never materialized. Adopted tabs are left alone — by then the rows
  * belong to the host snapshot, and the caller's own tabClose owns retiring the host page.
  */

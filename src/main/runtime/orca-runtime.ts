@@ -377,6 +377,8 @@ import type {
   SleepingAgentLaunchConfig
 } from '../../shared/agent-session-resume'
 import type { ExactWorkerProviderSession } from '../../shared/orchestration-worker-output'
+import { applyBrowserSessionTabSelection } from './browser-session-tab-selection-snapshot'
+import type { BrowserSessionTabSelectionOptions } from './browser-tab-create-publication'
 import type { RuntimeClientEvent } from '../../shared/runtime-client-events'
 import { toRuntimeActivateWorktreeEvent } from '../../shared/runtime-client-events'
 import {
@@ -9583,11 +9585,12 @@ export class OrcaRuntimeService {
   private markHeadlessBrowserSessionTabActive(
     worktreeId: string | undefined,
     browserPageId: string,
-    targetGroupId?: string
+    options: BrowserSessionTabSelectionOptions
   ): void {
     if (!worktreeId) {
       return
     }
+    const { targetGroupId, focusesHost } = options
     // Why: client-placed pages publish through the page registry and need no offscreen backing.
     if (
       !this.offscreenBrowserBackend &&
@@ -9605,46 +9608,34 @@ export class OrcaRuntimeService {
     if (!snapshot || !tab) {
       return
     }
-    const groups = snapshot.tabGroups ?? []
-    const hasTargetGroup =
-      targetGroupId !== undefined && groups.some((group) => group.id === targetGroupId)
-    // Why: move the new browser into the group whose "+" was clicked, removing it
-    // from wherever the rebuild placed it. Only the TARGET group's activeTabId
-    // (and the global active) change — every other group's active tab is left
-    // intact, so creating in the right group never resets the left group's tab.
-    const nextGroups = hasTargetGroup
-      ? groups.map((group) => {
-          const withoutTab = group.tabOrder.filter((id) => id !== tab.id)
-          if (group.id === targetGroupId) {
-            return { ...group, tabOrder: [...withoutTab, tab.id], activeTabId: tab.id }
-          }
-          return withoutTab.length === group.tabOrder.length
-            ? group
-            : { ...group, tabOrder: withoutTab }
-        })
-      : groups.map((group) =>
-          group.tabOrder.includes(tab.id) ? { ...group, activeTabId: tab.id } : group
-        )
-    const nextSnapshot: RuntimeMobileSessionTabsSnapshot = {
-      ...snapshot,
-      publicationEpoch: `headless:${Date.now().toString(36)}`,
-      snapshotVersion: snapshot.snapshotVersion + 1,
-      ...(hasTargetGroup ? { activeGroupId: targetGroupId } : {}),
-      activeTabId: tab.id,
-      activeTabType: 'browser',
-      tabs: snapshot.tabs.map((candidate) => ({
-        ...candidate,
-        isActive: candidate.id === tab.id
-      })),
-      tabGroups: nextGroups
-    }
+    const {
+      snapshot: nextSnapshot,
+      groups: nextGroups,
+      placedInTargetGroup
+    } = applyBrowserSessionTabSelection({
+      snapshot,
+      tabId: tab.id,
+      ...(targetGroupId !== undefined ? { targetGroupId } : {}),
+      focusesHost,
+      publicationEpoch: `headless:${Date.now().toString(36)}`
+    })
     this.mobileSessionTabsByWorktree.set(worktreeId, nextSnapshot)
     // Why: browser group membership is otherwise live-only; persist it so a
     // later rebuild keeps the browser in its group instead of coalescing left.
-    if (hasTargetGroup && nextSnapshot.tabGroupLayout) {
+    if (placedInTargetGroup && nextSnapshot.tabGroupLayout) {
       this.persistHeadlessTabGroups(worktreeId, nextGroups, nextSnapshot.tabGroupLayout)
     }
     this.emitMobileSessionTabsSnapshot(nextSnapshot)
+    if (options.caller) {
+      // Why: the originating device still lands on the tab it just created; only the shared
+      // snapshot stayed put. Local creates keep the pre-navigation shape by having no caller.
+      this.applyMobileSessionTabNavigation(
+        this.getMobileSessionTabsForWorktree(worktreeId),
+        tab.id,
+        options.caller.navigation,
+        options.caller.clientNavigationId
+      )
+    }
   }
 
   private closeHeadlessMobileTerminalTab(

@@ -21,10 +21,7 @@ import type {
 } from '../../../shared/agent-session-resume'
 import { BROWSER_TAB_CREATE_KNOWN_ID_RUNTIME_CAPABILITY } from '../../../shared/protocol-version'
 import { agentResumeHostAuthorityCapability } from './agent-resume-host-authority-capability'
-import {
-  expectsBrowserClientHosting,
-  runtimeAdvertisesBrowserClientHosting
-} from '../../../shared/browser-client-hosting-eligibility'
+import { expectsBrowserClientHosting } from '../../../shared/browser-client-hosting-eligibility'
 import type {
   BrowserClientHostPlacementPreference,
   BrowserPageCreationPlacement
@@ -98,6 +95,7 @@ import {
   isStagedWebRuntimeBrowserTabLive,
   rehomeStagedWebRuntimeBrowserTab,
   resolveStagedWebRuntimeBrowserTabGroupId,
+  restageWebRuntimeBrowserTabHostingIntent,
   stageWebRuntimeBrowserTab,
   StagedWebRuntimeBrowserTabCancelledError,
   type StagedWebRuntimeBrowserTab
@@ -581,10 +579,10 @@ export async function createWebRuntimeSessionBrowserTab(args: {
   const hostSupportsKnownPageId = advertisedCapabilities.includes(
     BROWSER_TAB_CREATE_KNOWN_ID_RUNTIME_CAPABILITY
   )
-  const hostAdvertisesClientHosting = runtimeAdvertisesBrowserClientHosting(advertisedCapabilities)
   // Why the same predicate the main process uses: this mounts the staged pane one round-trip
   // before prepareBrowserClientHostPlacement answers, so the two have to reach the same verdict
-  // from the same inputs. Only a cached status disagreeing with the live one costs the swap.
+  // from the same inputs. A cached status disagreeing with the live one is corrected by
+  // restageWebRuntimeBrowserTabHostingIntent below; it never decides the placement itself.
   const expectsClientHosting = expectsBrowserClientHosting({
     enabled: useAppStore.getState().settings?.browserClientHostedRemoteEnabled !== false,
     preference: args.placementPreference,
@@ -678,7 +676,14 @@ export async function createWebRuntimeSessionBrowserTab(args: {
     }
     const placementPreference = args.placementPreference ?? 'auto'
     let placement: BrowserPageCreationPlacement = { kind: 'server' }
-    if (placementPreference !== 'server' && hostAdvertisesClientHosting) {
+    // Why no cached-capability gate here: the renderer's runtime status can hold a pre-upgrade
+    // "cannot client-host" verdict for a whole catalog TTL, and skipping the preparation on it
+    // pinned a capable pair to server placement for that long. The preparation reads live status
+    // and answers `server` for a runtime that truly cannot host, so staleness now costs a round
+    // trip against an incapable host instead of the wrong placement. An unreachable host pays for
+    // that on the failure path too: the probe's 15s ceiling, then the tabCreate behind it and the
+    // cleanup close its non-definitive failure needs, where before the create never started.
+    if (placementPreference !== 'server') {
       try {
         await pauseDuringE2eWebRuntimeBrowserClientHostPreparation()
         placement = await window.api.runtimeEnvironments.prepareBrowserClientHostPlacement({
@@ -697,6 +702,13 @@ export async function createWebRuntimeSessionBrowserTab(args: {
         )
       }
     }
+    if (staged) {
+      staged = restageWebRuntimeBrowserTabHostingIntent(staged, {
+        environmentId,
+        remotePageId: provisionalPageId,
+        clientHosted: placement.kind === 'client'
+      })
+    }
     createAttempted = true
     const navigateAfterCreate =
       args.waitForRegistration === true && args.url && args.url !== 'about:blank'
@@ -710,6 +722,10 @@ export async function createWebRuntimeSessionBrowserTab(args: {
           ...(placement.kind === 'client' ? { placement } : {}),
           profileId: args.profileId ?? undefined,
           activate: shouldFocusOnCreate,
+          // Why: `activate` alone made every paired device — the host desktop included — jump to a
+          // tab this client created. New hosts read `navigation`; old ones ignore it and keep
+          // today's behavior, which is also what keeps their targetGroupId placement working.
+          navigation: 'caller',
           // Why: place the new browser in the clicked split group so the host snapshot is authoritative for it (no left-snap).
           ...(args.targetGroupId ? { targetGroupId: args.targetGroupId } : {}),
           // Why: web clients need the local tab now; waiting for host webview registration makes the workspace appear to close.

@@ -38,7 +38,12 @@ export async function prepareBrowserClientHostPlacement(
   const pairingRevision = requireCurrentPairing(initialEnvironment, options.expectedPairingRevision)
   const response = await options.getStatus(initialEnvironment.id)
   if (!response.ok) {
-    throw new Error(response.error.message)
+    // Why server instead of a throw: an unanswered probe never told us whether this host can
+    // client-host, and every create probes now that the renderer no longer gates on cached
+    // capabilities — so rethrowing would turn one flaky `status.get` (its own fresh socket, 15s
+    // ceiling) into a failed create that server placement completes. The tabCreate right behind
+    // this rides the same link and reports a genuinely dead connection itself.
+    return SERVER_PLACEMENT
   }
   const status = response.result
   if (status.runtimeId !== response._meta.runtimeId) {

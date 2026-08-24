@@ -62,10 +62,20 @@ async function prepareBrowserClientHost(
   try {
     // Idempotent per environment: the registry returns the live lease when one is already up, and
     // reserves no per-page state, so this only claims hosting duty.
-    await window.api.runtimeEnvironments.prepareBrowserClientHostPlacement({
+    const placement = await window.api.runtimeEnvironments.prepareBrowserClientHostPlacement({
       selector: environmentId,
       preference: 'auto'
     })
+    if (placement.kind !== 'client') {
+      // Why still worth a line: preparation stopped throwing when the probe cannot answer, so
+      // without this a relaunch that never recovers the retained pages says nothing at all.
+      console.warn(
+        '[restored-client-hosted-browser] no client host for restored pages; preparation answered',
+        placement.kind,
+        'for',
+        environmentId
+      )
+    }
   } catch (error) {
     // Why swallowed: both callers ride paths a throw would take down with them -- hydration, which
     // would boot the app in degraded no-save mode, and the status update, which would lose unrelated
