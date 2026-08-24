@@ -171,8 +171,7 @@ describe('publishCreatedBrowserSessionTab', () => {
       if (BROWSER_TAB_CREATE_PUBLICATION_RULES[placementKind].marksSessionTabFocus) {
         expect(markHeadlessBrowserSessionTabActive).toHaveBeenCalledWith('wt-1', 'page-1', {
           targetGroupId: 'group-right',
-          focusesHost: true,
-          navigation: 'all'
+          focusesHost: true
         })
       } else {
         expect(markHeadlessBrowserSessionTabActive).not.toHaveBeenCalled()
@@ -428,8 +427,7 @@ describe('browser tab-create placement census', () => {
       })
       expect(markHeadlessBrowserSessionTabActive).toHaveBeenCalledWith('wt-1', 'page-created', {
         targetGroupId: 'group-right',
-        focusesHost: true,
-        navigation: 'all'
+        focusesHost: true
       })
 
       markHeadlessBrowserSessionTabActive.mockClear()
@@ -543,8 +541,7 @@ describe('browser tab-create placement census', () => {
       expect(markHeadlessBrowserSessionTabActive).toHaveBeenCalledWith('wt-1', 'page-created', {
         targetGroupId: 'group-right',
         focusesHost: false,
-        navigation: 'caller',
-        clientNavigationId: 'device-a'
+        caller: { clientNavigationId: 'device-a', navigation: 'caller' }
       })
     })
   })

@@ -38,9 +38,12 @@ export type BrowserSessionTabSelectionOptions = {
    * silently decides whose screen moves.
    */
   focusesHost: boolean
-  navigation?: RuntimeNavigationTarget
-  /** The paired device that asked for the tab, when one did. */
-  clientNavigationId?: string
+  /**
+   * The paired device that asked for the tab, and how far its selection reaches. Absent for a
+   * local create. The two travel together because neither means anything alone — separately, the
+   * runtime had to default a navigation target that could never actually be missing.
+   */
+  caller?: { clientNavigationId: string; navigation: RuntimeNavigationTarget }
 }
 
 export type BrowserTabCreatePublication = {
@@ -239,9 +242,13 @@ export function publishCreatedBrowserSessionTab(
         ? { targetGroupId: publication.targetGroupId }
         : {}),
       focusesHost: publication.focus.focusesHost,
-      navigation: publication.focus.navigation,
       ...(publication.clientNavigationId !== undefined
-        ? { clientNavigationId: publication.clientNavigationId }
+        ? {
+            caller: {
+              clientNavigationId: publication.clientNavigationId,
+              navigation: publication.focus.navigation
+            }
+          }
         : {})
     })
   }

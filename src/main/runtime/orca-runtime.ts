@@ -9590,14 +9590,14 @@ export class OrcaRuntimeService {
       this.persistHeadlessTabGroups(worktreeId, nextGroups, nextSnapshot.tabGroupLayout)
     }
     this.emitMobileSessionTabsSnapshot(nextSnapshot)
-    if (options.clientNavigationId) {
+    if (options.caller) {
       // Why: the originating device still lands on the tab it just created; only the shared
-      // snapshot stayed put. Local creates keep the pre-navigation shape by having no caller id.
+      // snapshot stayed put. Local creates keep the pre-navigation shape by having no caller.
       this.applyMobileSessionTabNavigation(
         this.getMobileSessionTabsForWorktree(worktreeId),
         tab.id,
-        options.navigation ?? 'all',
-        options.clientNavigationId
+        options.caller.navigation,
+        options.caller.clientNavigationId
       )
     }
   }

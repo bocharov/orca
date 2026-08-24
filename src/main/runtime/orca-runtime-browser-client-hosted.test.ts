@@ -235,8 +235,7 @@ describe('RuntimeBrowserCommands client-hosted routing', () => {
     expect(markHeadlessBrowserSessionTabActive).toHaveBeenCalledWith('wt-1', 'page-grouped', {
       targetGroupId: 'group-right',
       focusesHost: true,
-      navigation: 'all',
-      clientNavigationId: 'device-a'
+      caller: { clientNavigationId: 'device-a', navigation: 'all' }
     })
 
     markHeadlessBrowserSessionTabActive.mockClear()
