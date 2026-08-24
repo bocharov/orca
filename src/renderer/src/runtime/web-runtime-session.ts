@@ -21,10 +21,7 @@ import type {
 } from '../../../shared/agent-session-resume'
 import { BROWSER_TAB_CREATE_KNOWN_ID_RUNTIME_CAPABILITY } from '../../../shared/protocol-version'
 import { agentResumeHostAuthorityCapability } from './agent-resume-host-authority-capability'
-import {
-  expectsBrowserClientHosting,
-  runtimeAdvertisesBrowserClientHosting
-} from '../../../shared/browser-client-hosting-eligibility'
+import { expectsBrowserClientHosting } from '../../../shared/browser-client-hosting-eligibility'
 import type {
   BrowserClientHostPlacementPreference,
   BrowserPageCreationPlacement
@@ -98,6 +95,7 @@ import {
   isStagedWebRuntimeBrowserTabLive,
   rehomeStagedWebRuntimeBrowserTab,
   resolveStagedWebRuntimeBrowserTabGroupId,
+  restageWebRuntimeBrowserTabHostingIntent,
   stageWebRuntimeBrowserTab,
   StagedWebRuntimeBrowserTabCancelledError,
   type StagedWebRuntimeBrowserTab
@@ -581,10 +579,10 @@ export async function createWebRuntimeSessionBrowserTab(args: {
   const hostSupportsKnownPageId = advertisedCapabilities.includes(
     BROWSER_TAB_CREATE_KNOWN_ID_RUNTIME_CAPABILITY
   )
-  const hostAdvertisesClientHosting = runtimeAdvertisesBrowserClientHosting(advertisedCapabilities)
   // Why the same predicate the main process uses: this mounts the staged pane one round-trip
   // before prepareBrowserClientHostPlacement answers, so the two have to reach the same verdict
-  // from the same inputs. Only a cached status disagreeing with the live one costs the swap.
+  // from the same inputs. A cached status disagreeing with the live one is corrected by
+  // restageWebRuntimeBrowserTabHostingIntent below; it never decides the placement itself.
   const expectsClientHosting = expectsBrowserClientHosting({
     enabled: useAppStore.getState().settings?.browserClientHostedRemoteEnabled !== false,
     preference: args.placementPreference,
@@ -678,7 +676,12 @@ export async function createWebRuntimeSessionBrowserTab(args: {
     }
     const placementPreference = args.placementPreference ?? 'auto'
     let placement: BrowserPageCreationPlacement = { kind: 'server' }
-    if (placementPreference !== 'server' && hostAdvertisesClientHosting) {
+    // Why no cached-capability gate here: the renderer's runtime status can hold a pre-upgrade
+    // "cannot client-host" verdict for a whole catalog TTL, and skipping the preparation on it
+    // pinned a capable pair to server placement for that long. The preparation reads live status
+    // and answers `server` for a runtime that truly cannot host, so staleness now costs a round
+    // trip against an incapable host instead of the wrong placement.
+    if (placementPreference !== 'server') {
       try {
         await pauseDuringE2eWebRuntimeBrowserClientHostPreparation()
         placement = await window.api.runtimeEnvironments.prepareBrowserClientHostPlacement({
@@ -696,6 +699,13 @@ export async function createWebRuntimeSessionBrowserTab(args: {
           { cause: error }
         )
       }
+    }
+    if (staged) {
+      staged = restageWebRuntimeBrowserTabHostingIntent(staged, {
+        environmentId,
+        remotePageId: provisionalPageId,
+        clientHosted: placement.kind === 'client'
+      })
     }
     createAttempted = true
     const navigateAfterCreate =
