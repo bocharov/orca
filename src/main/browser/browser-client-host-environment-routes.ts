@@ -22,9 +22,10 @@ export type BrowserClientHostEnvironmentRoutes = {
  */
 export function registerBrowserClientHostEnvironmentRoutes(
   environmentId: string,
-  downloadRouter: BrowserClientDownloadRouter
+  downloadRouter: BrowserClientDownloadRouter,
+  observeCurrentUrl?: (params: unknown) => void
 ): BrowserClientHostEnvironmentRoutes {
-  const pageMetadata = new BrowserClientPageMetadataTransport()
+  const pageMetadata = new BrowserClientPageMetadataTransport(observeCurrentUrl)
   const releases = [
     registerBrowserClientDownloadRouter(environmentId, downloadRouter),
     registerBrowserClientPageMetadataTransport(environmentId, pageMetadata)

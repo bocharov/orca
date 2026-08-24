@@ -309,7 +309,7 @@ async function waitForRelaunchedRuntime(
  * below (runtime-side page registry, single-row count, second-marker navigation) are what a fix
  * has to satisfy.
  */
-test.fixme('keeps a client-hosted browser tab across a paired runtime restart', async ({
+test('keeps a client-hosted browser tab across a paired runtime restart', async ({
   testRepoPath
 }, testInfo) => {
   test.setTimeout(420_000)
