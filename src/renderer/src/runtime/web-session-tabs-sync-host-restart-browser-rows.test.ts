@@ -164,6 +164,37 @@ describe('client-hosted browser rows across a host restart', () => {
     expect(next.remoteBrowserPageHandlesByPageId[PAGE_ID]).toBeUndefined()
   })
 
+  // The harder half: this frame is real. A restarted runtime rehydrated its terminals from disk and
+  // published a versioned snapshot under a real epoch, so the worktree-level gate affirms it -- only
+  // the flag says the browser rows in it are still incomplete.
+  it('keeps a client-hosted row through a real frame flagged unreconciled', () => {
+    const next = applyToState(
+      adoptedState(CLIENT_PLACEMENT),
+      makeSnapshot([], {
+        activeTabId: null,
+        activeTabType: null,
+        clientHostedPagesUnreconciled: true
+      })
+    )
+
+    expect(next.browserTabsByWorktree[WT]?.map((tab) => tab.id)).toEqual([WORKSPACE_ID])
+    expect(next.remoteBrowserPageHandlesByPageId[PAGE_ID]).toBeDefined()
+  })
+
+  it('culls a server-hosted row from a frame flagged unreconciled', () => {
+    const next = applyToState(
+      adoptedState(SERVER_PLACEMENT),
+      makeSnapshot([], {
+        activeTabId: null,
+        activeTabType: null,
+        clientHostedPagesUnreconciled: true
+      })
+    )
+
+    expect(next.browserTabsByWorktree[WT]).toBeUndefined()
+    expect(next.remoteBrowserPageHandlesByPageId[PAGE_ID]).toBeUndefined()
+  })
+
   // Why scoped to client-hosted: a server-placed page lives in the runtime process, so a restart
   // really did destroy it. Only a guest this desktop still runs can outlive the host.
   it('culls a server-hosted row on an unpublished-worktree snapshot', () => {

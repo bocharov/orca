@@ -217,23 +217,36 @@ async function openClientHostedFixturePage(
   expect(mirrored.placementKind, 'fixture page must be hosted on the viewing desktop').toBe(
     'client'
   )
-  await client.page.evaluate(
-    ({ browserPageId, worktreeId }) => {
-      window.__store?.getState().focusBrowserTabInWorktree(worktreeId, browserPageId, {
-        surfacePane: true
-      })
-    },
-    { browserPageId: mirrored.localPageId, worktreeId }
-  )
+  await focusClientBrowserRow(client.page, worktreeId, mirrored.localPageId)
   return mirrored
 }
 
-async function readClientWebviewMarker(page: Page, url: string): Promise<string | null> {
-  return page.evaluate(async (prefix) => {
-    for (const candidate of document.querySelectorAll('webview')) {
+/**
+ * Reads the marker out of the guest belonging to one specific row.
+ *
+ * Scoped to that row's pane rather than to every `<webview>` on the page: a scan by URL alone is
+ * satisfied by any guest on the fixture origin, so a run that lost the surviving tab and opened a
+ * fresh one would still read `moved-on` and pass.
+ */
+async function readClientWebviewMarker(
+  page: Page,
+  target: { urlPrefix: string; localPageId: string }
+): Promise<string | null> {
+  return page.evaluate(async ({ urlPrefix, localPageId }) => {
+    const state = window.__store?.getState()
+    const workspaceId = Object.entries(state?.browserPagesByWorkspace ?? {}).find(([, pages]) =>
+      pages.some((browserPage) => browserPage.id === localPageId)
+    )?.[0]
+    if (!workspaceId) {
+      return null
+    }
+    const pane = document.querySelector(
+      `[data-browser-overlay-tab-id="${CSS.escape(workspaceId)}"]`
+    )
+    for (const candidate of pane?.querySelectorAll('webview') ?? []) {
       const webview = candidate as Electron.WebviewTag
       try {
-        if (!webview.getURL().startsWith(prefix)) {
+        if (!webview.getURL().startsWith(urlPrefix)) {
           continue
         }
         return (await webview.executeJavaScript(
@@ -244,22 +257,38 @@ async function readClientWebviewMarker(page: Page, url: string): Promise<string 
       }
     }
     return null
-  }, url)
+  }, target)
 }
 
 async function waitForRenderedClientWebview(
   page: Page,
-  url: string,
+  target: { urlPrefix: string; localPageId: string },
   message: string
 ): Promise<string> {
   await expect
-    .poll(() => readClientWebviewMarker(page, url), { timeout: 120_000, message })
+    .poll(() => readClientWebviewMarker(page, target), { timeout: 120_000, message })
     .not.toBeNull()
-  const marker = await readClientWebviewMarker(page, url)
+  const marker = await readClientWebviewMarker(page, target)
   if (!marker) {
-    throw new Error(`Client-hosted guest for ${url} lost its marker`)
+    throw new Error(`Client-hosted guest for ${target.urlPrefix} lost its marker`)
   }
   return marker
+}
+
+/** Surfaces a row's pane so its guest is mounted where the scoped marker read can see it. */
+async function focusClientBrowserRow(
+  page: Page,
+  worktreeId: string,
+  localPageId: string
+): Promise<void> {
+  await page.evaluate(
+    ({ browserPageId, worktreeId }) => {
+      window.__store?.getState().focusBrowserTabInWorktree(worktreeId, browserPageId, {
+        surfacePane: true
+      })
+    },
+    { browserPageId: localPageId, worktreeId }
+  )
 }
 
 async function refreshAuthorityRuntimeId(client: PairedElectronClient): Promise<string | null> {
@@ -289,25 +318,22 @@ async function waitForRelaunchedRuntime(
 }
 
 /**
- * Server-restart half of the tab-persistence contract, and a known gap.
+ * Server-restart half of the tab-persistence contract. The client-quit half is covered by
+ * paired-client-hosted-browser-quit-survival.spec.ts.
  *
- * The client-quit half ships (see paired-client-hosted-browser-quit-survival.spec.ts). This
- * direction does not, and the chain that blocks it was measured against this spec:
+ * Two real Electron processes: a headless paired runtime whose serve process is genuinely replaced
+ * mid-test, and a desktop client running the guest. Each link in the chain a restart has to survive
+ * has its own oracle here, because any one of them failing looks like the same empty tab strip:
  *
- * 1. The client's lease reconnects with the runtime id it attached to, the relaunched runtime
- *    rejects it as `browser_client_host_authority_mismatch`, and the client retires the whole
- *    environment host — taking the guests it is still running down with it. Nothing re-attaches
- *    under the new identity: `ensureBrowserClientHostsForRestoredPages` only matches handles a
- *    session restore seeded.
- * 2. The runtime's client-hosted page registry is process memory, and the attach path can only
- *    reconcile pages it already has records for, so the client's inventory is never adopted.
- * 3. Adoption additionally has to reconcile command sequencing: page and host generations are
- *    per-process counters that restart at 1 and collide with the generations the client still
- *    holds, so a close/create pair for an imported page is rejected by the client dispatcher.
- *
- * Left as `fixme` rather than deleted: it is a working two-Electron reproduction, and the oracles
- * below (runtime-side page registry, single-row count, second-marker navigation) are what a fix
- * has to satisfy.
+ * 1. The client's lease reconnects naming a runtime id that no longer exists. The replacement
+ *    answers `browser_client_host_authority_mismatch`, which the client must read as "wait for the
+ *    successor" rather than as a reason to retire the environment and its live guests.
+ * 2. The relaunched runtime holds no page records, so it has to rebuild them from the inventory the
+ *    reattaching host reports — asserted against the runtime's own page registry, not the client's.
+ * 3. Adoption reissues the page under fresh generations, so the single-row count catches a recovery
+ *    that replays the create URL alongside the adopted page.
+ * 4. The guest must come back where the user left it, which is why the fixture moves the page before
+ *    the restart: on its create URL, restoring correctly and restoring wrongly agree.
  */
 test('keeps a client-hosted browser tab across a paired runtime restart', async ({
   testRepoPath
@@ -326,7 +352,7 @@ test('keeps a client-hosted browser tab across a paired runtime restart', async 
     expect(
       await waitForRenderedClientWebview(
         client.page,
-        fixture.markerUrl,
+        { urlPrefix: fixture.markerUrl, localPageId: opened.localPageId },
         'client-hosted guest never rendered the fixture'
       )
     ).toBe('restart-survivor')
@@ -344,7 +370,7 @@ test('keeps a client-hosted browser tab across a paired runtime restart', async 
     expect(
       await waitForRenderedClientWebview(
         client.page,
-        fixture.movedUrl,
+        { urlPrefix: fixture.movedUrl, localPageId: opened.localPageId },
         'the guest never rendered the page it navigated to'
       )
     ).toBe('moved-on')
@@ -389,21 +415,17 @@ test('keeps a client-hosted browser tab across a paired runtime restart', async 
     const survivorRows = rows.filter((row) => row.url.startsWith(fixture.origin))
     expect(survivorRows, 'the tab must survive the restart exactly once').toHaveLength(1)
 
-    const survivor = await findMirroredBrowserPage(
-      client.page,
-      restartedWorktreeId,
-      fixture.origin
+    const survivor = await findMirroredBrowserPage(client.page, restartedWorktreeId, fixture.origin)
+    expect(survivor?.remotePageId, 'recovery must keep the page identity it was created with').toBe(
+      opened.remotePageId
     )
-    expect(
-      survivor?.remotePageId,
-      'recovery must keep the page identity it was created with'
-    ).toBe(opened.remotePageId)
     expect(survivor?.placementKind, 'the surviving tab must still be client-hosted').toBe('client')
 
+    await focusClientBrowserRow(client.page, restartedWorktreeId, survivor!.localPageId)
     expect(
       await waitForRenderedClientWebview(
         client.page,
-        fixture.movedUrl,
+        { urlPrefix: fixture.movedUrl, localPageId: survivor!.localPageId },
         'the surviving tab never rendered its guest again'
       ),
       'the tab must come back where the user left it, not on its create URL'

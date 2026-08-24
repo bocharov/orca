@@ -2828,7 +2828,9 @@ function applyWebSessionTabsSnapshotWithContext(
         // yet taken its client-hosted pages back, answers with a frame that looks exactly like
         // "everything was closed". A page this desktop is still hosting outlives the runtime
         // process, so its own guest is the better evidence — hold the row and let adoption publish
-        // it, rather than deleting a tab that is still rendering. Both signals are host-bounded.
+        // it, rather than deleting a tab that is still rendering. The unreconciled flag is
+        // host-bounded; the unpublished-worktree frame is not, and its hold lasts until the runtime
+        // publishes that worktree at all.
         if (
           !hostSnapshotAffirmsClientHostedPages(snapshot) &&
           browserWorkspaceHasClientHostedEnvironmentPage(state, tab, environmentId)
