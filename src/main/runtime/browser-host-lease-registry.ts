@@ -32,8 +32,10 @@ import {
 } from './browser-host-capability-selection'
 import {
   createBrowserHostClientPage,
-  type BrowserClientPageExecutionHostGrant
+  type BrowserClientPageExecutionHostGrant,
+  type BrowserHostClientPageCreateOptions
 } from './browser-host-client-page-creation'
+import { adoptBrowserHostClientPages } from './browser-host-client-page-adoption'
 import { snapshotBrowserHostPageInventory } from './browser-host-page-inventory-snapshot'
 import { BrowserHostPageReconciliationOrchestrator } from './browser-host-page-reconciliation-orchestration'
 import type { BrowserHostRuntimePageIntent } from './browser-host-page-reconciliation-plan'
@@ -200,16 +202,9 @@ export class BrowserHostLeaseRegistry {
     })
   }
 
-  async createClientPage(options: {
-    browserPageId: string
-    browserHostClientId: string
-    pairedDeviceId: string
-    browserProfileId: string
-    executionHostKey: string
-    requiredCapabilities?: readonly string[]
-    timeoutMs?: number
-    workspaceId?: string
-  }): Promise<RuntimeBrowserClientPlacement> {
+  async createClientPage(
+    options: BrowserHostClientPageCreateOptions
+  ): Promise<RuntimeBrowserClientPlacement> {
     return createBrowserHostClientPage(options, {
       selectLease: (browserHostClientId, requiredCapabilities) =>
         this.select(browserHostClientId, [
@@ -234,46 +229,17 @@ export class BrowserHostLeaseRegistry {
     return this.pageReconciliations.reconcile(this.requireLeaseState(identity), intents, options)
   }
 
-  /**
-   * Reclaims live client guests this runtime did not place, holding the execution-host grants the
-   * reconciliation plan requires. Grants taken for intents that do not end up placed are released,
-   * so a partial reclaim cannot strand a tunnel.
-   */
-  async adoptClientPages(
+  adoptClientPages(
     identity: BrowserHostLeaseIdentity,
     intents: readonly BrowserHostRuntimePageIntent[],
     options: { maxConcurrency?: number; actionTimeoutMs?: number; signal?: AbortSignal } = {}
   ): Promise<readonly string[]> {
-    if (intents.length === 0) {
-      return []
-    }
-    const state = this.requireLeaseState(identity)
-    const grants = intents.map((intent) => ({
-      intent,
-      grant: state.executionHostGrants.retain(intent.executionHostKey)
-    }))
-    const adopted: string[] = []
-    // A reclaim that fails part way still leaves the pages it did place; settling grants against
-    // the committed placements keeps those and drops the rest.
-    await this.pageReconciliations.reconcile(state, intents, options).catch(() => undefined)
-    for (const { intent, grant } of grants) {
-      const placement = this.pagePlacements.getPlacement(intent.browserPageId)
-      if (
-        placement?.kind === 'client' &&
-        placement.pageHostGeneration === intent.pageHostGeneration &&
-        !this.clientPageExecutionHostGrants.has(intent.browserPageId)
-      ) {
-        this.clientPageExecutionHostGrants.set(intent.browserPageId, {
-          placement,
-          executionHostKey: intent.executionHostKey,
-          release: grant.release
-        })
-        adopted.push(intent.browserPageId)
-      } else {
-        grant.release()
-      }
-    }
-    return adopted
+    return adoptBrowserHostClientPages(intents, options, {
+      state: this.requireLeaseState(identity),
+      reconciliations: this.pageReconciliations,
+      placements: this.pagePlacements,
+      executionHostGrants: this.clientPageExecutionHostGrants
+    })
   }
 
   attachCommandDelivery(

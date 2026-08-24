@@ -22,7 +22,7 @@ import type {
   RuntimeMobileSessionTabGroup,
   RuntimeMobileSessionTerminalClientTab
 } from '../../../shared/runtime-types'
-import { hostSnapshotAffirmsWorktreeContents } from './host-session-snapshot-authority'
+import { hostSnapshotAffirmsClientHostedPages } from './host-session-snapshot-authority'
 import type {
   BrowserCertificateFailure,
   BrowserPage,
@@ -2824,12 +2824,13 @@ function applyWebSessionTabsSnapshotWithContext(
         ) {
           return false
         }
-        // Why: a runtime that has published nothing for this worktree yet answers with an empty
-        // frame that looks exactly like "everything was closed". A page this desktop is still
-        // hosting outlives the runtime process, so its own guest is the better evidence — hold the
-        // row and let re-adoption publish it, rather than deleting a tab that is still rendering.
+        // Why: a runtime with nothing published for this worktree, or one that has restarted and not
+        // yet taken its client-hosted pages back, answers with a frame that looks exactly like
+        // "everything was closed". A page this desktop is still hosting outlives the runtime
+        // process, so its own guest is the better evidence — hold the row and let adoption publish
+        // it, rather than deleting a tab that is still rendering. Both signals are host-bounded.
         if (
-          !hostSnapshotAffirmsWorktreeContents(snapshot) &&
+          !hostSnapshotAffirmsClientHostedPages(snapshot) &&
           browserWorkspaceHasClientHostedEnvironmentPage(state, tab, environmentId)
         ) {
           return false

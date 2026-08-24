@@ -9,6 +9,10 @@ type RestoredBrowserHandleSource = {
 // and that attempt has to be retryable. What stops the retries is the restored marker itself --
 // adoption spends it the moment the host republishes the page.
 const preparingEnvironmentIds = new Set<string>()
+// Coalescing an ordinary retry is fine, but a restart must not be swallowed by a preparation still
+// aimed at the runtime that just died -- that request can hang until its RPC times out, and dropping
+// the one signal that the authority changed is exactly how the rows get lost.
+const environmentIdsAwaitingRepreparation = new Set<string>()
 
 /**
  * Start this desktop's browser client host for every environment the restored session says it was
@@ -41,11 +45,17 @@ export async function ensureBrowserClientHostForRestartedRuntime(
   if (!hasLiveClientHostedPage(state, environmentId)) {
     return
   }
-  await prepareBrowserClientHost(environmentId)
+  await prepareBrowserClientHost(environmentId, true)
 }
 
-async function prepareBrowserClientHost(environmentId: string): Promise<void> {
+async function prepareBrowserClientHost(
+  environmentId: string,
+  repreparesWhenBusy = false
+): Promise<void> {
   if (preparingEnvironmentIds.has(environmentId)) {
+    if (repreparesWhenBusy) {
+      environmentIdsAwaitingRepreparation.add(environmentId)
+    }
     return
   }
   preparingEnvironmentIds.add(environmentId)
@@ -57,8 +67,9 @@ async function prepareBrowserClientHost(environmentId: string): Promise<void> {
       preference: 'auto'
     })
   } catch (error) {
-    // Why swallowed: this runs inside the startup chain, where a throw aborts hydration and boots
-    // the app in degraded no-save mode. A page nobody hosts is recoverable; a lost session is not.
+    // Why swallowed: both callers ride paths a throw would take down with them -- hydration, which
+    // would boot the app in degraded no-save mode, and the status update, which would lose unrelated
+    // state. A page nobody hosts is recoverable; a lost session is not.
     console.warn(
       '[restored-client-hosted-browser] failed to start the browser client host for',
       environmentId,
@@ -66,6 +77,9 @@ async function prepareBrowserClientHost(environmentId: string): Promise<void> {
     )
   } finally {
     preparingEnvironmentIds.delete(environmentId)
+  }
+  if (environmentIdsAwaitingRepreparation.delete(environmentId)) {
+    await prepareBrowserClientHost(environmentId)
   }
 }
 
@@ -94,4 +108,5 @@ function restoredClientHostEnvironmentIds(state: RestoredBrowserHandleSource): s
 
 export function resetRestoredBrowserClientHostAttachForTests(): void {
   preparingEnvironmentIds.clear()
+  environmentIdsAwaitingRepreparation.clear()
 }

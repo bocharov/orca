@@ -669,6 +669,7 @@ import {
   type ClientHostedBrowserRpcRoute
 } from './runtime-browser-client-automation'
 import { resolveRuntimeBrowserNetworkExecutionHost } from './runtime-browser-network-execution-host'
+import { ClientHostedPageReconciliationWindow } from './client-hosted-page-reconciliation-window'
 import { browserNetworkExecutionHostKey } from '../browser/browser-network-execution-route'
 import type { BrowserNetworkExecutionHost } from '../../shared/browser-client-host-protocol'
 import { sameRuntimeBrowserPlacement } from '../../shared/runtime-browser-placement'
@@ -3051,6 +3052,9 @@ export class OrcaRuntimeService {
   private readonly rendererPublicationThrottle = new RendererPublicationThrottle()
   private tabs = new Map<string, RuntimeSyncedTab>()
   private mobileSessionTabsByWorktree = new Map<string, RuntimeMobileSessionTabsSnapshot>()
+  private readonly clientHostedPageReconciliation = new ClientHostedPageReconciliationWindow(
+    Date.now()
+  )
   // Why: renderer publication ordering must be judged against the renderer's
   // own last-accepted (epoch, version) — never against the stored snapshot's
   // version, which main-local touches bump independently and can push
@@ -31372,6 +31376,11 @@ export class OrcaRuntimeService {
    * that minted them, so a restart always invalidates them. Returns undefined when the workspace is
    * gone, which is also the signal that its pages have nothing left to be restored into.
    */
+  /** Closes the window in which snapshots warn that client-hosted pages are still unaccounted for. */
+  markClientHostedPagesReconciled(): void {
+    this.clientHostedPageReconciliation.markReconciled()
+  }
+
   async resolveBrowserExecutionHostKeyForWorkspace(
     workspaceId: string
   ): Promise<string | undefined> {
@@ -33687,6 +33696,9 @@ export class OrcaRuntimeService {
           activeGroupId: null,
           activeTabId: null,
           activeTabType: null,
+          ...(this.clientHostedPageReconciliation.isUnreconciled(Date.now())
+            ? { clientHostedPagesUnreconciled: true as const }
+            : {}),
           tabs: []
         },
         clientNavigationId
@@ -34095,6 +34107,9 @@ export class OrcaRuntimeService {
       activeTabType: active?.type ?? null,
       ...(tabGroups ? { tabGroups } : {}),
       ...(snapshot.tabGroupLayout !== undefined ? { tabGroupLayout } : {}),
+      ...(this.clientHostedPageReconciliation.isUnreconciled(Date.now())
+        ? { clientHostedPagesUnreconciled: true as const }
+        : {}),
       tabs: normalizedTabs
     }
   }

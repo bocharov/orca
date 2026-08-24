@@ -5,6 +5,10 @@ type SnapshotPublication = {
   snapshotVersion: number
 }
 
+type ClientHostedPagePublication = SnapshotPublication & {
+  clientHostedPagesUnreconciled?: true
+}
+
 /**
  * Whether a session-tabs snapshot carries the host's answer about a worktree at all.
  *
@@ -22,4 +26,19 @@ export function hostSnapshotAffirmsWorktreeContents(snapshot: SnapshotPublicatio
     snapshot.publicationEpoch === UNPUBLISHED_WORKTREE_PUBLICATION_EPOCH &&
     snapshot.snapshotVersion === 0
   )
+}
+
+/**
+ * Whether a snapshot's browser rows are the host's answer about this desktop's client-hosted pages.
+ *
+ * Narrower than {@link hostSnapshotAffirmsWorktreeContents} on purpose. A restarted runtime rebuilds
+ * terminals from disk and publishes a real, versioned frame under a real epoch — authoritative for
+ * everything it owns, but silently missing the client-hosted pages it has not yet taken back from
+ * the hosts still holding them. `clientHostedPagesUnreconciled` is the host saying so, and the
+ * runtime bounds it, so trusting it cannot strand a row indefinitely.
+ */
+export function hostSnapshotAffirmsClientHostedPages(
+  snapshot: ClientHostedPagePublication
+): boolean {
+  return hostSnapshotAffirmsWorktreeContents(snapshot) && !snapshot.clientHostedPagesUnreconciled
 }

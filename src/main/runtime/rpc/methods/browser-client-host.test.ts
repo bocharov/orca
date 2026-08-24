@@ -33,6 +33,9 @@ function runtime(cleanups = new Map<string, () => void>()): OrcaRuntimeService {
   return {
     getRuntimeId: () => 'runtime-a',
     getStartedAt: () => 1,
+    // Attach adopts client-hosted pages from the reported inventory before recovery runs.
+    resolveBrowserExecutionHostKeyForWorkspace: async () => undefined,
+    markClientHostedPagesReconciled: () => {},
     registerSubscriptionCleanup: (id: string, cleanup: () => void) => cleanups.set(id, cleanup)
   } as unknown as OrcaRuntimeService
 }

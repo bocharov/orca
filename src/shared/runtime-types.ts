@@ -372,6 +372,16 @@ export type RuntimeMobileSessionTabsResult = {
   tabGroups?: RuntimeMobileSessionTabGroup[]
   tabGroupLayout?: TabGroupLayoutNode | null
   tabs: RuntimeMobileSessionClientTab[]
+  /**
+   * Set while a freshly started runtime has not yet taken back the client-hosted pages its paired
+   * hosts are still holding. Such a snapshot is authoritative about terminals, which it rehydrated
+   * from disk, but silently empty of browser rows it has simply not heard about yet — so a client
+   * must not read the absence of its own client-hosted rows here as "the host closed them".
+   *
+   * Always bounded: the runtime clears it once a host attaches, and drops it on a deadline so a
+   * host that never returns cannot hold rows open forever.
+   */
+  clientHostedPagesUnreconciled?: true
 }
 
 export type RuntimeMobileSessionCreateTerminalResult = {

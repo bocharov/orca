@@ -116,6 +116,9 @@ export const BROWSER_CLIENT_HOST_METHODS: RpcAnyMethod[] = [
             runtime.resolveBrowserExecutionHostKeyForWorkspace(workspaceId),
           ...(signal ? { signal } : {})
         })
+        // A host has now reported what it holds, so snapshots stop warning that client-hosted pages
+        // are unaccounted for -- whether or not any page turned out to be adoptable.
+        runtime.markClientHostedPagesReconciled()
         await recoverUnavailableRuntimeBrowserClientPages({
           lease: handle.lease,
           authority: registry,

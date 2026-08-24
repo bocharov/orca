@@ -14,17 +14,19 @@ export type BrowserClientPageExecutionHostGrant = {
   release: () => void
 }
 
+export type BrowserHostClientPageCreateOptions = {
+  browserPageId: string
+  browserHostClientId: string
+  pairedDeviceId: string
+  browserProfileId: string
+  executionHostKey: string
+  requiredCapabilities?: readonly string[]
+  timeoutMs?: number
+  workspaceId?: string
+}
+
 export async function createBrowserHostClientPage(
-  options: {
-    browserPageId: string
-    browserHostClientId: string
-    pairedDeviceId: string
-    browserProfileId: string
-    executionHostKey: string
-    requiredCapabilities?: readonly string[]
-    timeoutMs?: number
-    workspaceId?: string
-  },
+  options: BrowserHostClientPageCreateOptions,
   dependencies: {
     selectLease(
       browserHostClientId: string,

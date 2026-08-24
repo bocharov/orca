@@ -68,8 +68,7 @@ export async function adoptRuntimeBrowserClientPagesFromInventory(
     },
     lease: {
       browserHostClientId: options.lease.browserHostClientId,
-      browserHostGeneration: options.lease.browserHostGeneration,
-      pairedDeviceId: options.lease.pairedDeviceId
+      browserHostGeneration: options.lease.browserHostGeneration
     },
     executionHostKeyByWorkspaceId
   })
@@ -86,7 +85,7 @@ export async function adoptRuntimeBrowserClientPagesFromInventory(
         pairedDeviceId: options.lease.pairedDeviceId
       },
       intents,
-      { ...(options.signal ? { signal: options.signal } : {}) }
+      options.signal ? { signal: options.signal } : {}
     )
   )
   const byPageId = new Map(adoptable.map((page) => [page.browserPageId, page]))
