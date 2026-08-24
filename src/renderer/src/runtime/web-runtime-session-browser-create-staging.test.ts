@@ -280,7 +280,10 @@ describe('createWebRuntimeSessionBrowserTab optimistic staging', () => {
   })
 
   it('unwinds a staged tab without offering it to the reopen stack', async () => {
-    vi.stubGlobal('window', webRuntimeSessionWindowApi(vi.fn().mockRejectedValue(new Error('offline'))))
+    vi.stubGlobal(
+      'window',
+      webRuntimeSessionWindowApi(vi.fn().mockRejectedValue(new Error('offline')))
+    )
 
     await expect(
       createWebRuntimeSessionBrowserTab({

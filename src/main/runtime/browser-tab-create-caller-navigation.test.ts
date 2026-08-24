@@ -107,8 +107,20 @@ function createPairedRuntime() {
   internals.agentBrowserBridge = {
     tabList: vi.fn(() => ({
       tabs: [
-        { browserPageId: 'page-old', index: 0, url: 'https://old.test', title: 'Old', active: true },
-        { browserPageId: 'page-alt', index: 1, url: 'https://alt.test', title: 'Alt', active: false },
+        {
+          browserPageId: 'page-old',
+          index: 0,
+          url: 'https://old.test',
+          title: 'Old',
+          active: true
+        },
+        {
+          browserPageId: 'page-alt',
+          index: 1,
+          url: 'https://alt.test',
+          title: 'Alt',
+          active: false
+        },
         { browserPageId: 'page-new', index: 2, url: 'about:blank', title: 'New', active: false }
       ]
     })),

@@ -13,8 +13,26 @@ function makeSnapshot(): RuntimeMobileSessionTabsSnapshot {
     activeTabId: 'terminal-tab',
     activeTabType: 'terminal',
     tabs: [
-      { type: 'terminal', id: 'terminal-tab', parentTabId: 'terminal-tab', leafId: 'leaf-1', title: 'Terminal', isActive: true },
-      { type: 'browser', id: 'page-new', browserWorkspaceId: 'page-new', browserPageId: 'page-new', title: 'New', url: 'about:blank', loading: false, canGoBack: false, canGoForward: false, isActive: false }
+      {
+        type: 'terminal',
+        id: 'terminal-tab',
+        parentTabId: 'terminal-tab',
+        leafId: 'leaf-1',
+        title: 'Terminal',
+        isActive: true
+      },
+      {
+        type: 'browser',
+        id: 'page-new',
+        browserWorkspaceId: 'page-new',
+        browserPageId: 'page-new',
+        title: 'New',
+        url: 'about:blank',
+        loading: false,
+        canGoBack: false,
+        canGoForward: false,
+        isActive: false
+      }
     ] as RuntimeMobileSessionTabsSnapshot['tabs'],
     tabGroups: [
       { id: 'group-left', tabOrder: ['terminal-tab', 'page-new'], activeTabId: 'terminal-tab' },

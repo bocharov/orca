@@ -408,7 +408,12 @@ describe('createWebRuntimeSessionBrowserTab', () => {
 
   it('can log remote browser failure without retaining downstream details', async () => {
     const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-    vi.stubGlobal('window', webRuntimeSessionWindowApi(vi.fn().mockRejectedValue(new Error('failed https://example.com/?q=private'))))
+    vi.stubGlobal(
+      'window',
+      webRuntimeSessionWindowApi(
+        vi.fn().mockRejectedValue(new Error('failed https://example.com/?q=private'))
+      )
+    )
 
     await expect(
       createWebRuntimeSessionBrowserTab({

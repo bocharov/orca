@@ -168,7 +168,10 @@ describe('createWebRuntimeSessionBrowserTab', () => {
   })
 
   it('releases and removes a newly-created split when host creation is ambiguous', async () => {
-    vi.stubGlobal('window', webRuntimeSessionWindowApi(vi.fn().mockRejectedValue(new Error('offline'))))
+    vi.stubGlobal(
+      'window',
+      webRuntimeSessionWindowApi(vi.fn().mockRejectedValue(new Error('offline')))
+    )
 
     await expect(
       createWebRuntimeSessionBrowserTab({

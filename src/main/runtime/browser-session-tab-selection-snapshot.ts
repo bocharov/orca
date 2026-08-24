@@ -42,7 +42,9 @@ export function applyBrowserSessionTabSelection(args: {
             ...(focusesHost ? { activeTabId: tabId } : {})
           }
         }
-        return withoutTab.length === group.tabOrder.length ? group : { ...group, tabOrder: withoutTab }
+        return withoutTab.length === group.tabOrder.length
+          ? group
+          : { ...group, tabOrder: withoutTab }
       })
     : focusesHost
       ? groups.map((group) =>

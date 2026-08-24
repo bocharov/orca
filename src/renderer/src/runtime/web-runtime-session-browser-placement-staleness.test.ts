@@ -142,13 +142,23 @@ describe('browser placement against a stale capability cache', () => {
     const preparePlacement = vi
       .fn()
       .mockResolvedValue({ kind: 'client', browserHostClientId: 'browser-client-a' })
-    vi.stubGlobal('window', webRuntimeSessionWindowApi(successfulCreateCalls(), preparePlacement))
+    const runtimeCall = successfulCreateCalls()
+    vi.stubGlobal('window', webRuntimeSessionWindowApi(runtimeCall, preparePlacement))
 
     await createWebRuntimeSessionBrowserTab({ worktreeId: WORKTREE_ID })
 
     // The staged frame is minted from the cache, so without the re-mark the pane mounts the
     // streamed component and swaps only once adoption lands.
     expect(lastStagedHandle()).toMatchObject({ staged: true, stagedClientHosted: true })
+    // The rewrite must keep addressing the page the create actually asked the host for; a handle
+    // pointing anywhere else describes a page nothing will ever adopt. Matched against every write
+    // rather than the last, because adoption rewrites the handle again with the host's own id.
+    expect(mocks.setRemoteBrowserPageHandle.mock.calls.map((call) => call[1])).toContainEqual({
+      environmentId: ENVIRONMENT_ID,
+      remotePageId: runtimeCall.mock.calls[0]?.[0].params.page,
+      staged: true,
+      stagedClientHosted: true
+    })
   })
 
   it('clears the staged client-hosted mark when the live placement answers server', async () => {

@@ -338,9 +338,9 @@ describe('browser tab-create focus resolution', () => {
   })
 
   it.each(['caller', 'clients'] as const)('never focuses the host for navigation %s', (target) => {
-    expect(
-      resolveBrowserTabCreateFocus({ activate: true, navigation: target }).focusesHost
-    ).toBe(false)
+    expect(resolveBrowserTabCreateFocus({ activate: true, navigation: target }).focusesHost).toBe(
+      false
+    )
   })
 
   it.each(['host', 'all'] as const)('focuses the host for navigation %s', (target) => {
