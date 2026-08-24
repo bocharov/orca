@@ -78,7 +78,11 @@ const browserClientHosts =
         transport: fileChannel,
         resolvePage: (webContentsId) => executor?.findPageByWebContentsId(webContentsId)
       })
-      const routes = registerBrowserClientHostEnvironmentRoutes(input.environmentId, downloadRelay)
+      const routes = registerBrowserClientHostEnvironmentRoutes(
+        input.environmentId,
+        downloadRelay,
+        (params) => executor?.recordPublishedPageUrl(params)
+      )
       return new PairedRuntimeBrowserClientHostComposition({
         onClosing: routes.release,
         initialInput: input,

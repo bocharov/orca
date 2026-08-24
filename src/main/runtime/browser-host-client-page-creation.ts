@@ -14,16 +14,19 @@ export type BrowserClientPageExecutionHostGrant = {
   release: () => void
 }
 
+export type BrowserHostClientPageCreateOptions = {
+  browserPageId: string
+  browserHostClientId: string
+  pairedDeviceId: string
+  browserProfileId: string
+  executionHostKey: string
+  requiredCapabilities?: readonly string[]
+  timeoutMs?: number
+  workspaceId?: string
+}
+
 export async function createBrowserHostClientPage(
-  options: {
-    browserPageId: string
-    browserHostClientId: string
-    pairedDeviceId: string
-    browserProfileId: string
-    executionHostKey: string
-    requiredCapabilities?: readonly string[]
-    timeoutMs?: number
-  },
+  options: BrowserHostClientPageCreateOptions,
   dependencies: {
     selectLease(
       browserHostClientId: string,
@@ -63,7 +66,8 @@ export async function createBrowserHostClientPage(
     const command = {
       type: 'createPage' as const,
       browserProfileId: options.browserProfileId,
-      executionHostKey: options.executionHostKey
+      executionHostKey: options.executionHostKey,
+      ...(options.workspaceId ? { workspaceId: options.workspaceId } : {})
     }
     assertBrowserHostPageCommandAdmission(lease, command, (executionHostKey) =>
       state.executionHostGrants.require(executionHostKey)

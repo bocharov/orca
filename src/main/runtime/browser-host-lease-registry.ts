@@ -32,8 +32,10 @@ import {
 } from './browser-host-capability-selection'
 import {
   createBrowserHostClientPage,
-  type BrowserClientPageExecutionHostGrant
+  type BrowserClientPageExecutionHostGrant,
+  type BrowserHostClientPageCreateOptions
 } from './browser-host-client-page-creation'
+import { adoptBrowserHostClientPages } from './browser-host-client-page-adoption'
 import { snapshotBrowserHostPageInventory } from './browser-host-page-inventory-snapshot'
 import { BrowserHostPageReconciliationOrchestrator } from './browser-host-page-reconciliation-orchestration'
 import type { BrowserHostRuntimePageIntent } from './browser-host-page-reconciliation-plan'
@@ -200,15 +202,9 @@ export class BrowserHostLeaseRegistry {
     })
   }
 
-  async createClientPage(options: {
-    browserPageId: string
-    browserHostClientId: string
-    pairedDeviceId: string
-    browserProfileId: string
-    executionHostKey: string
-    requiredCapabilities?: readonly string[]
-    timeoutMs?: number
-  }): Promise<RuntimeBrowserClientPlacement> {
+  async createClientPage(
+    options: BrowserHostClientPageCreateOptions
+  ): Promise<RuntimeBrowserClientPlacement> {
     return createBrowserHostClientPage(options, {
       selectLease: (browserHostClientId, requiredCapabilities) =>
         this.select(browserHostClientId, [
@@ -225,12 +221,17 @@ export class BrowserHostLeaseRegistry {
     return requireLiveBrowserClientPage(this.pagePlacements, this.leasesByClientId, authority)
   }
 
-  reconcileClientPages(
+  adoptClientPages(
     identity: BrowserHostLeaseIdentity,
     intents: readonly BrowserHostRuntimePageIntent[],
     options: { maxConcurrency?: number; actionTimeoutMs?: number; signal?: AbortSignal } = {}
-  ) {
-    return this.pageReconciliations.reconcile(this.requireLeaseState(identity), intents, options)
+  ): Promise<readonly string[]> {
+    return adoptBrowserHostClientPages(intents, options, {
+      state: this.requireLeaseState(identity),
+      reconciliations: this.pageReconciliations,
+      placements: this.pagePlacements,
+      executionHostGrants: this.clientPageExecutionHostGrants
+    })
   }
 
   attachCommandDelivery(

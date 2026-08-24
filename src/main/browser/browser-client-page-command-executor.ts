@@ -24,6 +24,7 @@ import {
 } from './browser-client-page-retained-state'
 import {
   createBrowserClientPageInventory,
+  recordBrowserClientPagePublishedUrl,
   snapshotBrowserClientPageInventoryList
 } from './browser-client-page-inventory'
 import {
@@ -136,6 +137,9 @@ export class BrowserClientPageCommandExecutor {
   hasUnresolvedPage(browserPageId: string, pageHostGeneration: number): boolean {
     return this.failedPages.get(browserPageId)?.pageHostGeneration === pageHostGeneration
   }
+
+  readonly recordPublishedPageUrl = (params: unknown): void =>
+    recordBrowserClientPagePublishedUrl(this.pages, params)
 
   snapshotPageInventory(): readonly BrowserClientHostedPageInventory[] {
     return snapshotBrowserClientPageInventoryList(

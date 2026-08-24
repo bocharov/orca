@@ -486,7 +486,8 @@ import {
   type RuntimeSyncWindowGraph,
   type RuntimeWorktreeListResult,
   type BrowserTabInfo,
-  type BrowserScreencastResult
+  type BrowserScreencastResult,
+  UNPUBLISHED_WORKTREE_PUBLICATION_EPOCH
 } from '../../shared/runtime-types'
 import {
   RUNTIME_GRAPH_RELOAD_TIMEOUT_MS,
@@ -668,6 +669,10 @@ import {
   type ClientHostedBrowserRpcRoute
 } from './runtime-browser-client-automation'
 import { resolveRuntimeBrowserNetworkExecutionHost } from './runtime-browser-network-execution-host'
+import { ClientHostedPageReconciliationWindow } from './client-hosted-page-reconciliation-window'
+import type { BrowserExecutionHostKeyResolution } from './runtime-browser-client-page-adoption'
+import { browserNetworkExecutionHostKey } from '../browser/browser-network-execution-route'
+import type { BrowserNetworkExecutionHost } from '../../shared/browser-client-host-protocol'
 import { sameRuntimeBrowserPlacement } from '../../shared/runtime-browser-placement'
 import { RemoteRuntimeTerminalCreateIdempotency } from './remote-runtime-terminal-create-idempotency'
 import { deriveRemoteRuntimeTerminalCreateHandle } from './remote-runtime-terminal-create-identity'
@@ -3048,6 +3053,9 @@ export class OrcaRuntimeService {
   private readonly rendererPublicationThrottle = new RendererPublicationThrottle()
   private tabs = new Map<string, RuntimeSyncedTab>()
   private mobileSessionTabsByWorktree = new Map<string, RuntimeMobileSessionTabsSnapshot>()
+  private readonly clientHostedPageReconciliation = new ClientHostedPageReconciliationWindow(
+    Date.now()
+  )
   // Why: renderer publication ordering must be judged against the renderer's
   // own last-accepted (epoch, version) — never against the stored snapshot's
   // version, which main-local touches bump independently and can push
@@ -7093,7 +7101,7 @@ export class OrcaRuntimeService {
     this.hydrateHeadlessMobileSessionTabsFromWorkspaceSession()
     await this.refreshMobileSessionPtyRecords()
     return [...this.mobileSessionTabsByWorktree.values()].map((snapshot) =>
-      this.clientSessionTabSelections.project(
+      this.projectMobileSessionTabsForClient(
         this.toMobileSessionTabsResult(snapshot),
         clientNavigationId
       )
@@ -8798,9 +8806,33 @@ export class OrcaRuntimeService {
     const result = this.toMobileSessionTabsResult(snapshot)
     for (const subscription of this.mobileSessionTabListeners) {
       subscription.listener(
-        this.clientSessionTabSelections.project(result, subscription.clientNavigationId)
+        this.projectMobileSessionTabsForClient(result, subscription.clientNavigationId)
       )
     }
+  }
+
+  /**
+   * Answers one client's session-tabs question: whether this runtime has taken back *that* client's
+   * client-hosted pages yet, then that client's own tab selection.
+   *
+   * The hold is decided here and nowhere else, and it is set or cleared rather than only set, so a
+   * frame built for one client can never carry another client's answer.
+   */
+  private projectMobileSessionTabsForClient(
+    result: RuntimeMobileSessionTabsResult,
+    clientNavigationId?: string
+  ): RuntimeMobileSessionTabsResult {
+    return this.clientSessionTabSelections.project(
+      this.withClientHostedPagesHold(result, clientNavigationId),
+      clientNavigationId
+    )
+  }
+
+  private withClientHostedPagesHold(
+    result: RuntimeMobileSessionTabsResult,
+    clientNavigationId: string | undefined
+  ): RuntimeMobileSessionTabsResult {
+    return this.clientHostedPageReconciliation.holdFor(result, clientNavigationId, Date.now())
   }
 
   private async refreshMobileSessionPtyRecords(
@@ -9017,7 +9049,11 @@ export class OrcaRuntimeService {
         ids.add(clientNavigationId)
       }
       for (const id of ids) {
-        const projected = this.clientSessionTabSelections.activate(snapshot, id, activeTabId)
+        const projected = this.clientSessionTabSelections.activate(
+          this.withClientHostedPagesHold(snapshot, id),
+          id,
+          activeTabId
+        )
         this.emitMobileSessionTabsSnapshotToClient(projected, id, true)
         if (id === clientNavigationId) {
           callerSnapshot = projected
@@ -9026,14 +9062,14 @@ export class OrcaRuntimeService {
     } else if (clientNavigationId) {
       // Why: follow-host still starts as caller navigation; the host is an additional target, not a replacement owner.
       callerSnapshot = this.clientSessionTabSelections.activate(
-        snapshot,
+        this.withClientHostedPagesHold(snapshot, clientNavigationId),
         clientNavigationId,
         activeTabId
       )
       this.emitMobileSessionTabsSnapshotToClient(callerSnapshot, clientNavigationId)
     }
     if (clientNavigationId) {
-      return callerSnapshot ?? this.clientSessionTabSelections.project(snapshot, clientNavigationId)
+      return callerSnapshot ?? this.projectMobileSessionTabsForClient(snapshot, clientNavigationId)
     }
     if (navigation === 'caller') {
       const selection = activateClientSessionTabSelection(
@@ -29248,7 +29284,7 @@ export class OrcaRuntimeService {
     const result = this.toMobileSessionTabsResult(next)
     for (const subscription of this.mobileSessionTabListeners) {
       subscription.listener(
-        this.clientSessionTabSelections.project(result, subscription.clientNavigationId)
+        this.projectMobileSessionTabsForClient(result, subscription.clientNavigationId)
       )
     }
     const created = result.tabs.find((candidate) => candidate.id === tab.id)
@@ -31360,6 +31396,75 @@ export class OrcaRuntimeService {
     return folderScope?.folderWorkspace
       ? this.folderWorkspaceToResolvedWorktree(folderScope.folderWorkspace)
       : this.resolveWorktreeSelector(selector)
+  }
+
+  /**
+   * Closes the window in which snapshots warn that this client's client-hosted pages are still
+   * unaccounted for. Keyed by paired device because one client attaching says nothing about another.
+   */
+  markClientHostedPagesReconciled(pairedDeviceId: string): void {
+    this.clientHostedPageReconciliation.markReconciled(pairedDeviceId)
+  }
+
+  /**
+   * The execution-host key a client-hosted page in this workspace would be created under now.
+   *
+   * Adoption cannot reuse the key an inventory entry reports: native and WSL keys name the runtime
+   * that minted them, and an SSH key carries a per-process provider epoch, so a restart always
+   * invalidates them.
+   *
+   * The two failure modes are not the same answer. A workspace that no longer resolves is gone and
+   * its pages have nothing left to be restored into; an execution host that is merely not up yet --
+   * an SSH provider mid-reconnect, a project runtime still repairing -- is a "not now", and must
+   * never be read as permission to retire the page.
+   */
+  async resolveBrowserExecutionHostKeyForWorkspace(
+    workspaceId: string
+  ): Promise<BrowserExecutionHostKeyResolution> {
+    let worktree: ResolvedWorktree
+    try {
+      worktree = await this.resolveBrowserWorkspace(`id:${workspaceId}`)
+    } catch {
+      return { status: 'workspace-gone' }
+    }
+    try {
+      return {
+        status: 'resolved',
+        executionHostKey: browserNetworkExecutionHostKey(
+          await this.resolveBrowserNetworkExecutionHostForWorktree(worktree)
+        )
+      }
+    } catch {
+      return { status: 'unavailable' }
+    }
+  }
+
+  private resolveBrowserNetworkExecutionHostForWorktree(worktree?: {
+    id: string
+    repoId?: string
+    hostId?: ExecutionHostId
+  }): BrowserNetworkExecutionHost | Promise<BrowserNetworkExecutionHost> {
+    const repo = worktree?.repoId ? this.requireStore().getRepo(worktree.repoId) : undefined
+    const executionHostId = worktree
+      ? getWorktreeExecutionHostId(worktree, repo)
+      : LOCAL_EXECUTION_HOST_ID
+    const parsedHost = parseExecutionHostId(executionHostId)
+    return resolveRuntimeBrowserNetworkExecutionHost({
+      runtimeId: this.getRuntimeId(),
+      runtimeRevision: this.getStartedAt(),
+      executionHostId,
+      ...(worktree
+        ? {
+            projectRuntime: resolveLocalProjectRuntimeForWorktreeId(
+              this.requireStore(),
+              worktree.id
+            )
+          }
+        : {}),
+      ...(parsedHost?.kind === 'ssh'
+        ? { sshState: getRegisteredSshState(parsedHost.targetId) }
+        : {})
+    })
   }
 
   private async resolveEmulatorCleanupWorkspaceId(selector: string): Promise<string> {
@@ -33603,7 +33708,7 @@ export class OrcaRuntimeService {
     const result = this.toMobileSessionTabsResult(snapshot)
     for (const subscription of this.mobileSessionTabListeners) {
       subscription.listener(
-        this.clientSessionTabSelections.project(result, subscription.clientNavigationId)
+        this.projectMobileSessionTabsForClient(result, subscription.clientNavigationId)
       )
     }
   }
@@ -33616,7 +33721,7 @@ export class OrcaRuntimeService {
       const result = this.toMobileSessionTabsResult(snapshot)
       for (const subscription of this.mobileSessionTabListeners) {
         subscription.listener(
-          this.clientSessionTabSelections.project(result, subscription.clientNavigationId)
+          this.projectMobileSessionTabsForClient(result, subscription.clientNavigationId)
         )
       }
     }
@@ -33628,10 +33733,10 @@ export class OrcaRuntimeService {
   ): RuntimeMobileSessionTabsResult {
     const snapshot = this.mobileSessionTabsByWorktree.get(worktreeId)
     if (!snapshot) {
-      return this.clientSessionTabSelections.project(
+      return this.projectMobileSessionTabsForClient(
         {
           worktree: worktreeId,
-          publicationEpoch: 'none',
+          publicationEpoch: UNPUBLISHED_WORKTREE_PUBLICATION_EPOCH,
           snapshotVersion: 0,
           activeGroupId: null,
           activeTabId: null,
@@ -33641,7 +33746,7 @@ export class OrcaRuntimeService {
         clientNavigationId
       )
     }
-    return this.clientSessionTabSelections.project(
+    return this.projectMobileSessionTabsForClient(
       this.toMobileSessionTabsResult(snapshot),
       clientNavigationId
     )
@@ -38333,29 +38438,8 @@ export class OrcaRuntimeService {
     resolveBrowserWorkspace: (selector) => this.resolveBrowserWorkspace(selector),
     getBrowserHostLeaseRegistry: () => getBrowserHostLeaseRegistry(this),
     getRuntimeBrowserPageRegistry: () => getRuntimeBrowserPageRegistry(this),
-    resolveBrowserNetworkExecutionHost: (worktree) => {
-      const repo = worktree?.repoId ? this.requireStore().getRepo(worktree.repoId) : undefined
-      const executionHostId = worktree
-        ? getWorktreeExecutionHostId(worktree, repo)
-        : LOCAL_EXECUTION_HOST_ID
-      const parsedHost = parseExecutionHostId(executionHostId)
-      return resolveRuntimeBrowserNetworkExecutionHost({
-        runtimeId: this.getRuntimeId(),
-        runtimeRevision: this.getStartedAt(),
-        executionHostId,
-        ...(worktree
-          ? {
-              projectRuntime: resolveLocalProjectRuntimeForWorktreeId(
-                this.requireStore(),
-                worktree.id
-              )
-            }
-          : {}),
-        ...(parsedHost?.kind === 'ssh'
-          ? { sshState: getRegisteredSshState(parsedHost.targetId) }
-          : {})
-      })
-    },
+    resolveBrowserNetworkExecutionHost: (worktree) =>
+      this.resolveBrowserNetworkExecutionHostForWorktree(worktree),
     getAuthoritativeWindow: () => this.getAuthoritativeWindow(),
     getAvailableAuthoritativeWindow: () => this.getAvailableAuthoritativeWindow(),
     getOffscreenBrowserBackend: () => this.offscreenBrowserBackend,

@@ -26,6 +26,13 @@ export const BROWSER_CLIENT_PAGE_METADATA_REQUEST_TIMEOUT_MS = 30_000
 export class BrowserClientPageMetadataTransport {
   private sender: BrowserClientPageMetadataSender | null = null
 
+  /**
+   * Why the transport and not the navigate command: a guest the user drives -- a link, a form, a
+   * redirect -- never issues one, so the page inventory would keep naming the URL the page was
+   * created at. This is the only seam that sees every navigation.
+   */
+  constructor(private readonly observeCurrentUrl?: (params: unknown) => void) {}
+
   bind(sender: BrowserClientPageMetadataSender): void {
     this.sender = sender
   }
@@ -37,6 +44,7 @@ export class BrowserClientPageMetadataTransport {
   }
 
   async publish(params: unknown): Promise<{ accepted: boolean }> {
+    this.observeCurrentUrl?.(params)
     const sender = this.sender
     if (!sender) {
       throw new RemoteRuntimeClientError(

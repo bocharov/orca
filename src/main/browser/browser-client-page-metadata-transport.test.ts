@@ -159,3 +159,53 @@ describe('browser client page metadata routing', () => {
     })
   })
 })
+
+describe('published-url observation', () => {
+  // Why the transport and not the navigate command: a guest the user drives never issues one, so
+  // without this seam a restored tab reopens at the URL it was created with.
+  it('reports every publish to the observer', async () => {
+    const observeCurrentUrl = vi.fn()
+    const transport = new BrowserClientPageMetadataTransport(observeCurrentUrl)
+    transport.bind({
+      sendPageMetadataRequest: vi.fn().mockResolvedValue(answered({ accepted: true }))
+    })
+
+    await transport.publish(PARAMS)
+    await transport.publish({ ...PARAMS, revision: 3, url: 'https://example.internal/again' })
+
+    expect(observeCurrentUrl.mock.calls).toEqual([
+      [PARAMS],
+      [{ ...PARAMS, revision: 3, url: 'https://example.internal/again' }]
+    ])
+  })
+
+  // The runtime is what fails when the lease is down; the local record of where the guest went is
+  // still correct, and losing it would restore the page at a stale address.
+  it('observes the publish even when no lease is bound to send it', async () => {
+    const observeCurrentUrl = vi.fn()
+    const transport = new BrowserClientPageMetadataTransport(observeCurrentUrl)
+
+    await expect(transport.publish(PARAMS)).rejects.toBeInstanceOf(RemoteRuntimeClientError)
+    expect(observeCurrentUrl).toHaveBeenCalledWith(PARAMS)
+  })
+
+  it('observes params the schema will reject rather than pre-filtering them', async () => {
+    const observeCurrentUrl = vi.fn()
+    const transport = new BrowserClientPageMetadataTransport(observeCurrentUrl)
+    transport.bind({
+      sendPageMetadataRequest: vi.fn().mockResolvedValue(answered({ accepted: true }))
+    })
+
+    await transport.publish({ nonsense: true })
+
+    expect(observeCurrentUrl).toHaveBeenCalledWith({ nonsense: true })
+  })
+
+  it('publishes normally when no observer was supplied', async () => {
+    const sendPageMetadataRequest = vi.fn().mockResolvedValue(answered({ accepted: true }))
+    const transport = new BrowserClientPageMetadataTransport()
+    transport.bind({ sendPageMetadataRequest })
+
+    await expect(transport.publish(PARAMS)).resolves.toEqual({ accepted: true })
+  })
+})

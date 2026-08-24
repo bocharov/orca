@@ -1588,7 +1588,8 @@ export class RuntimeBrowserCommands {
         browserHostClientId: params.placement.browserHostClientId,
         pairedDeviceId: caller.pairedDeviceId,
         browserProfileId,
-        executionHost
+        executionHost,
+        workspaceId: worktree.id
       })
       const pages = this.host.getRuntimeBrowserPageRegistry()
       pages.publishClientPage({

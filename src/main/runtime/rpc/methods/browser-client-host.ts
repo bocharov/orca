@@ -4,11 +4,14 @@ import {
 } from '../../../../shared/protocol-version'
 import { BrowserClientPageMetadataParams } from '../../../../shared/browser-client-page-metadata-protocol'
 import {
+  BROWSER_CLIENT_HOST_AUTHORITY_MISMATCH_CODE,
   BrowserClientHostAttachParams,
   BrowserClientHostCommandResultParams
 } from '../../../../shared/browser-client-host-protocol'
+import { BrowserError } from '../../../browser/browser-error'
 import { getBrowserHostLeaseRegistry } from '../../browser-host-lease-registry-instance'
 import { getRuntimeBrowserPageRegistry } from '../../runtime-browser-page-registry'
+import { adoptRuntimeBrowserClientPagesFromInventory } from '../../runtime-browser-client-page-adoption'
 import { recoverUnavailableRuntimeBrowserClientPages } from '../../runtime-browser-client-page-recovery'
 import { releaseRuntimeBrowserClientPageRecord } from '../../runtime-browser-client-page-release'
 import { defineMethod, defineStreamingMethod, type RpcAnyMethod } from '../core'
@@ -29,7 +32,10 @@ export const BROWSER_CLIENT_HOST_METHODS: RpcAnyMethod[] = [
         throw new Error('browser_client_host_capability_required')
       }
       if (params.authorityRuntimeId !== runtime.getRuntimeId()) {
-        throw new Error('browser_client_host_authority_mismatch')
+        throw new BrowserError(
+          BROWSER_CLIENT_HOST_AUTHORITY_MISMATCH_CODE,
+          BROWSER_CLIENT_HOST_AUTHORITY_MISMATCH_CODE
+        )
       }
 
       const registry = getBrowserHostLeaseRegistry(runtime)
@@ -99,6 +105,24 @@ export const BROWSER_CLIENT_HOST_METHODS: RpcAnyMethod[] = [
             emit
           )
         }
+        // Before recovery, which only reconciles pages this runtime already knows: a restart left
+        // the guests alive on the client but took the records with it.
+        const adoption = await adoptRuntimeBrowserClientPagesFromInventory({
+          lease: handle.lease,
+          authority: registry,
+          pages: getRuntimeBrowserPageRegistry(runtime),
+          notifyWorkspace: (workspaceId) => runtime.notifyMobileSessionTabsChanged(workspaceId),
+          resolveExecutionHostKey: (workspaceId) =>
+            runtime.resolveBrowserExecutionHostKeyForWorkspace(workspaceId),
+          ...(signal ? { signal } : {})
+        })
+        if (adoption.unadoptedPageIds.length === 0) {
+          // This client's host has reported what it holds and the runtime has taken all of it back,
+          // so snapshots stop warning that its client-hosted pages are unaccounted for. A page left
+          // behind means the opposite -- its guest is live and record-less -- so the hold stands
+          // until a later attach settles it or the window's deadline expires.
+          runtime.markClientHostedPagesReconciled(pairedDeviceId)
+        }
         await recoverUnavailableRuntimeBrowserClientPages({
           lease: handle.lease,
           authority: registry,
@@ -106,6 +130,7 @@ export const BROWSER_CLIENT_HOST_METHODS: RpcAnyMethod[] = [
           notifyWorkspace: (workspaceId) => runtime.notifyMobileSessionTabsChanged(workspaceId),
           releaseUnrecoverablePage: (page) =>
             releaseRuntimeBrowserClientPageRecord(runtime, page.browserPageId, page.placement),
+          adoptedPageIds: new Set(adoption.adoptedPageIds),
           ...(signal ? { signal } : {})
         })
         const reason = await Promise.race([
@@ -142,7 +167,10 @@ export const BROWSER_CLIENT_HOST_METHODS: RpcAnyMethod[] = [
         throw new Error('browser_client_host_capability_required')
       }
       if (params.authorityRuntimeId !== runtime.getRuntimeId()) {
-        throw new Error('browser_client_host_authority_mismatch')
+        throw new BrowserError(
+          BROWSER_CLIENT_HOST_AUTHORITY_MISMATCH_CODE,
+          BROWSER_CLIENT_HOST_AUTHORITY_MISMATCH_CODE
+        )
       }
       const accepted = getBrowserHostLeaseRegistry(runtime).settleClientPageCommand(
         {
