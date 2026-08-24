@@ -35,6 +35,7 @@ export function renderTabBarSurface({
   itemProjection,
   tabStripNavigation,
   tabStripDragScroll,
+  activeClientHostedBrowserRowId,
   togglePinned
 }: {
   props: TabBarProps
@@ -43,6 +44,7 @@ export function renderTabBarSurface({
   itemProjection: TabBarItemProjection
   tabStripNavigation: ReturnType<typeof useTabStripOverflowNavigation>
   tabStripDragScroll: ReturnType<typeof useTabStripDragScrollHandlers>
+  activeClientHostedBrowserRowId: string | null
   togglePinned: (item: TabBarItem) => void
 }): React.JSX.Element {
   const {
@@ -94,6 +96,7 @@ export function renderTabBarSurface({
     runtime,
     dropIndicatorByVisibleId,
     includeTopTabBorder,
+    activeClientHostedBrowserRowId,
     togglePinned
   })
   const standardCreateMenuItems = renderTabBarStaticCreateMenu({
@@ -168,8 +171,6 @@ export function renderTabBarSurface({
               .join(' ')}
           >
             {renderedItems}
-            {/* Why: mount the subscriber only when there is something to show — the overwhelming
-                majority of strips never see a client-hosted page. */}
             {clientHostedBrowserRows.length > 0 ? (
               <ClientHostedBrowserTabRows
                 rows={clientHostedBrowserRows}

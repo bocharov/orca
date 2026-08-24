@@ -19,6 +19,7 @@ export function renderTabBarItems({
   runtime,
   dropIndicatorByVisibleId,
   includeTopTabBorder,
+  activeClientHostedBrowserRowId,
   togglePinned
 }: {
   items: TabBarItem[]
@@ -26,6 +27,7 @@ export function renderTabBarItems({
   runtime: TabBarRuntimeModel
   dropIndicatorByVisibleId: Map<string, DropIndicator>
   includeTopTabBorder: boolean
+  activeClientHostedBrowserRowId: string | null
   togglePinned: (item: TabBarItem) => void
 }): React.ReactNode[] {
   const {
@@ -63,6 +65,10 @@ export function renderTabBarItems({
     toggleTabViewMode,
     statusByRelativePath
   } = runtime
+
+  // A selected client-hosted row covers the pane, so the tab it covers must stop looking active —
+  // the group's own activeTabId never moves for it, and two underlines would show at once.
+  const clientHostedRowOwnsActiveState = activeClientHostedBrowserRowId !== null
 
   // Why: this is the strip's single activation fan-out, so retiring a client-hosted placeholder
   // here covers every row kind — including re-clicking the tab that was already active, which the
@@ -125,6 +131,7 @@ export function renderTabBarItems({
           hasTabsToRight={index < items.length - 1}
           hasTabsToLeft={index > 0}
           isActive={
+            !clientHostedRowOwnsActiveState &&
             (activeTabType === 'terminal' || activeTabType === 'simulator') &&
             item.id === activeTabId
           }
@@ -150,7 +157,11 @@ export function renderTabBarItems({
         <BrowserTab
           key={item.id}
           tab={item.data}
-          isActive={activeTabType === 'browser' && activeBrowserTabId === item.id}
+          isActive={
+            !clientHostedRowOwnsActiveState &&
+            activeTabType === 'browser' &&
+            activeBrowserTabId === item.id
+          }
           isPinned={item.isPinned}
           hasTabsToRight={index < items.length - 1}
           hasTabsToLeft={index > 0}
@@ -189,7 +200,11 @@ export function renderTabBarItems({
         <EditorFileTab
           key={item.id}
           file={simulatorFile}
-          isActive={activeTabType === 'simulator' && item.id === activeSimulatorTabId}
+          isActive={
+            !clientHostedRowOwnsActiveState &&
+            activeTabType === 'simulator' &&
+            item.id === activeSimulatorTabId
+          }
           isPinned={item.isPinned}
           hasTabsToRight={index < items.length - 1}
           hasTabsToLeft={index > 0}
@@ -214,7 +229,9 @@ export function renderTabBarItems({
         key={item.id}
         file={item.data}
         isActive={
-          (activeTabType === 'editor' || activeTabType === 'simulator') && activeFileId === item.id
+          !clientHostedRowOwnsActiveState &&
+          (activeTabType === 'editor' || activeTabType === 'simulator') &&
+          activeFileId === item.id
         }
         isPinned={item.isPinned}
         hasTabsToRight={index < items.length - 1}

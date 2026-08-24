@@ -7,6 +7,7 @@ import {
   getClientHostedBrowserRows,
   hydrateClientHostedBrowserRows,
   isClientHostedBrowserRowSelectionLive,
+  resolveActiveClientHostedBrowserRowId,
   selectClientHostedBrowserRow
 } from './client-hosted-browser-row-state'
 
@@ -162,5 +163,42 @@ describe('client-hosted browser row selection', () => {
     expect(
       isClientHostedBrowserRowSelectionLive(null, [{ id: 'group-1', activeTabId: null }])
     ).toBe(false)
+  })
+})
+
+/**
+ * Both halves of a strip ask this one question, so its answers are what keep the strip from
+ * underlining a real tab and a client-hosted row at the same time.
+ */
+describe('active client-hosted row for a strip', () => {
+  const selection = {
+    worktreeId: 'wt-1',
+    browserPageId: 'page-1',
+    groupId: 'group-1',
+    groupActiveTabIdAtSelection: 'tab-1'
+  }
+  const scope = { worktreeId: 'wt-1', groupId: 'group-1', groupActiveTabId: 'tab-1' }
+
+  it('names the picked row', () => {
+    expect(resolveActiveClientHostedBrowserRowId(selection, scope)).toBe('page-1')
+  })
+
+  it('names nothing with no selection', () => {
+    expect(resolveActiveClientHostedBrowserRowId(null, scope)).toBeNull()
+  })
+
+  it('names nothing once the group activates another tab', () => {
+    expect(
+      resolveActiveClientHostedBrowserRowId(selection, { ...scope, groupActiveTabId: 'tab-2' })
+    ).toBeNull()
+  })
+
+  it('leaves other strips alone', () => {
+    expect(
+      resolveActiveClientHostedBrowserRowId(selection, { ...scope, groupId: 'group-2' })
+    ).toBeNull()
+    expect(
+      resolveActiveClientHostedBrowserRowId(selection, { ...scope, worktreeId: 'wt-2' })
+    ).toBeNull()
   })
 })

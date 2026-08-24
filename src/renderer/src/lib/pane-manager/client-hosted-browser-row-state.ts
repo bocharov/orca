@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react'
+import { useCallback, useSyncExternalStore } from 'react'
 import type {
   ClientHostedBrowserRow,
   ClientHostedBrowserRowsEvent
@@ -43,6 +43,10 @@ function getSnapshot(): number {
 
 function getServerSnapshot(): number {
   return 0
+}
+
+function getNoActiveRowServerSnapshot(): string | null {
+  return null
 }
 
 function notifyChange(): void {
@@ -134,4 +138,46 @@ export function isClientHostedBrowserRowSelectionLive(
   return (
     group !== undefined && (group.activeTabId ?? null) === candidate.groupActiveTabIdAtSelection
   )
+}
+
+export type ClientHostedBrowserRowStripScope = {
+  worktreeId: string
+  groupId: string
+  groupActiveTabId: string | null
+}
+
+/**
+ * Which row — if any — owns a strip's active styling.
+ *
+ * The strip's two halves are painted by different code (real tabs from the group's `activeTabId`,
+ * trailing rows from this store) and neither can see the other's answer, so both ask this instead:
+ * a non-null id means every real tab renders inactive, and null means no row does. One value, so
+ * the strip cannot show two active tabs at once.
+ */
+export function resolveActiveClientHostedBrowserRowId(
+  candidate: ClientHostedBrowserRowSelection | null,
+  scope: ClientHostedBrowserRowStripScope
+): string | null {
+  if (!candidate || candidate.worktreeId !== scope.worktreeId) {
+    return null
+  }
+  return isClientHostedBrowserRowSelectionLive(candidate, [
+    { id: scope.groupId, activeTabId: scope.groupActiveTabId }
+  ])
+    ? candidate.browserPageId
+    : null
+}
+
+export function useActiveClientHostedBrowserRowId(
+  scope: ClientHostedBrowserRowStripScope
+): string | null {
+  const { worktreeId, groupId, groupActiveTabId } = scope
+  // Why snapshot the derived id and not the selection: every strip subscribes, so a row title or
+  // loading push must not re-render strips whose active state did not move.
+  const getActiveRowId = useCallback(
+    () =>
+      resolveActiveClientHostedBrowserRowId(selection, { worktreeId, groupId, groupActiveTabId }),
+    [groupActiveTabId, groupId, worktreeId]
+  )
+  return useSyncExternalStore(subscribe, getActiveRowId, getNoActiveRowServerSnapshot)
 }

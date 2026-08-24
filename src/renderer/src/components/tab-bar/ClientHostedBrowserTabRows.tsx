@@ -5,7 +5,7 @@ import { useAppStore } from '../../store'
 import type { ClientHostedBrowserRow } from '../../../../shared/client-hosted-browser-rows'
 import {
   selectClientHostedBrowserRow,
-  useClientHostedBrowserRowSelection
+  useActiveClientHostedBrowserRowId
 } from '@/lib/pane-manager/client-hosted-browser-row-state'
 import { closeClientHostedBrowserRow } from '../../runtime/client-hosted-browser-row-close'
 import ClientHostedBrowserTab from './ClientHostedBrowserTab'
@@ -31,7 +31,7 @@ export default function ClientHostedBrowserTabRows({
   groupActiveTabId: string | null
   includeTopTabBorder: boolean
 }): React.JSX.Element | null {
-  const selection = useClientHostedBrowserRowSelection()
+  const activeRowId = useActiveClientHostedBrowserRowId({ worktreeId, groupId, groupActiveTabId })
   const focusGroup = useAppStore((state) => state.focusGroup)
 
   const activate = useCallback(
@@ -57,7 +57,7 @@ export default function ClientHostedBrowserTabRows({
         <ClientHostedBrowserTab
           key={row.browserPageId}
           row={row}
-          isActive={selection?.browserPageId === row.browserPageId && selection.groupId === groupId}
+          isActive={activeRowId === row.browserPageId}
           hasTabsToRight={index < rows.length - 1}
           includeTopTabBorder={includeTopTabBorder}
           onActivate={() => activate(row.browserPageId)}

@@ -5,9 +5,11 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { toast } from 'sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { clearClientHostedBrowserRowSelection } from '@/lib/pane-manager/client-hosted-browser-row-state'
 import type { ClientHostedBrowserRow } from '../../../../shared/client-hosted-browser-rows'
 import { closeClientHostedBrowserRow } from '../../runtime/client-hosted-browser-row-close'
 import ClientHostedBrowserTabRows from './ClientHostedBrowserTabRows'
+import { getTabRootStateClasses } from './drop-indicator'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
@@ -32,26 +34,56 @@ const ROW: ClientHostedBrowserRow = {
 }
 
 const mountedRoots: Root[] = []
+let mountedRoot: Root | null = null
 
-function renderRows(): HTMLElement {
+function rowsTree(groupActiveTabId: string | null): React.JSX.Element {
+  return (
+    <TooltipProvider>
+      <ClientHostedBrowserTabRows
+        rows={[ROW]}
+        worktreeId="wt-1"
+        groupId="group-1"
+        groupActiveTabId={groupActiveTabId}
+        includeTopTabBorder
+      />
+    </TooltipProvider>
+  )
+}
+
+function renderRows(groupActiveTabId: string | null = null): HTMLElement {
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root = createRoot(container)
   mountedRoots.push(root)
+  mountedRoot = root
   act(() => {
-    root.render(
-      <TooltipProvider>
-        <ClientHostedBrowserTabRows
-          rows={[ROW]}
-          worktreeId="wt-1"
-          groupId="group-1"
-          groupActiveTabId={null}
-          includeTopTabBorder
-        />
-      </TooltipProvider>
-    )
+    root.render(rowsTree(groupActiveTabId))
   })
   return container
+}
+
+function rerenderRows(groupActiveTabId: string | null): void {
+  act(() => {
+    mountedRoot?.render(rowsTree(groupActiveTabId))
+  })
+}
+
+function rowElement(container: HTMLElement): HTMLElement {
+  const row = container.querySelector<HTMLElement>('[data-client-hosted-browser-row-id="page-1"]')
+  if (!row) {
+    throw new Error('row not found')
+  }
+  return row
+}
+
+function isRowActive(container: HTMLElement): boolean {
+  return rowElement(container).className.includes(getTabRootStateClasses(true))
+}
+
+function clickRow(container: HTMLElement): void {
+  act(() => {
+    rowElement(container).dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }))
+  })
 }
 
 function clickClose(container: HTMLElement): void {
@@ -66,8 +98,34 @@ function clickClose(container: HTMLElement): void {
 
 afterEach(() => {
   mountedRoots.splice(0).forEach((root) => act(() => root.unmount()))
+  mountedRoot = null
+  clearClientHostedBrowserRowSelection()
   document.body.innerHTML = ''
   vi.clearAllMocks()
+})
+
+describe('ClientHostedBrowserTabRows selection', () => {
+  it('underlines the row the user picked', () => {
+    const container = renderRows('tab-a')
+
+    clickRow(container)
+
+    expect(isRowActive(container)).toBe(true)
+  })
+
+  /**
+   * The other half of the strip paints itself from the group's `activeTabId`, which a keyboard
+   * switch or the command palette moves without ever touching this row. Holding the underline
+   * through that move is how the strip ends up showing two active tabs.
+   */
+  it('drops the underline once the group activates a real tab', () => {
+    const container = renderRows('tab-a')
+    clickRow(container)
+
+    rerenderRows('tab-b')
+
+    expect(isRowActive(container)).toBe(false)
+  })
 })
 
 describe('ClientHostedBrowserTabRows close', () => {
