@@ -144,6 +144,48 @@ describe('runtime git client merge operations', () => {
     }
   )
 
+  it.each(SEQUENCER_CASES)(
+    'surfaces an upgrade prompt for %# when the host predates %s',
+    async (run, apiMethod, rpcMethod) => {
+      runtimeEnvironmentCall.mockResolvedValue({
+        id: 'rpc-1',
+        ok: false,
+        error: { code: 'method_not_found', message: `Unknown method: ${rpcMethod}` },
+        _meta: { runtimeId: 'remote-runtime' }
+      })
+
+      await expect(
+        run({
+          settings: { activeRuntimeEnvironmentId: 'env-1' },
+          worktreeId: 'wt-1',
+          worktreePath: '/repo'
+        })
+      ).rejects.toThrow(/running an older version/)
+
+      expect(gitSequencer[apiMethod]).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(SEQUENCER_CASES)(
+    'propagates non-compatibility failures for %# on %s',
+    async (run, _apiMethod, rpcMethod) => {
+      runtimeEnvironmentCall.mockResolvedValue({
+        id: 'rpc-1',
+        ok: false,
+        error: { code: 'git_error', message: `${rpcMethod} failed: needs merge` },
+        _meta: { runtimeId: 'remote-runtime' }
+      })
+
+      await expect(
+        run({
+          settings: { activeRuntimeEnvironmentId: 'env-1' },
+          worktreeId: 'wt-1',
+          worktreePath: '/repo'
+        })
+      ).rejects.toThrow(/needs merge/)
+    }
+  )
+
   it('routes abort rebase through the active runtime', async () => {
     runtimeEnvironmentCall.mockResolvedValue({
       id: 'rpc-1',

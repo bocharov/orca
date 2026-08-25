@@ -272,20 +272,20 @@ export class GitHandler {
     this.dispatcher.onRequest('git.bulkUnstage', (p) => this.bulkUnstage(p))
     this.dispatcher.onRequest('git.abortMerge', (p) => this.abortMerge(p))
     this.dispatcher.onRequest('git.abortRebase', (p) => this.abortRebase(p))
-    this.dispatcher.onRequest('git.continueMerge', (p) =>
-      this.sequencerAction(p, ['merge', '--continue'])
+    this.dispatcher.onRequest('git.continueMerge', (p, context) =>
+      this.sequencerAction(p, ['merge', '--continue'], context)
     )
-    this.dispatcher.onRequest('git.continueRebase', (p) =>
-      this.sequencerAction(p, ['rebase', '--continue'])
+    this.dispatcher.onRequest('git.continueRebase', (p, context) =>
+      this.sequencerAction(p, ['rebase', '--continue'], context)
     )
-    this.dispatcher.onRequest('git.continueCherryPick', (p) =>
-      this.sequencerAction(p, ['cherry-pick', '--continue'])
+    this.dispatcher.onRequest('git.continueCherryPick', (p, context) =>
+      this.sequencerAction(p, ['cherry-pick', '--continue'], context)
     )
-    this.dispatcher.onRequest('git.skipRebase', (p) =>
-      this.sequencerAction(p, ['rebase', '--skip'])
+    this.dispatcher.onRequest('git.skipRebase', (p, context) =>
+      this.sequencerAction(p, ['rebase', '--skip'], context)
     )
-    this.dispatcher.onRequest('git.skipCherryPick', (p) =>
-      this.sequencerAction(p, ['cherry-pick', '--skip'])
+    this.dispatcher.onRequest('git.skipCherryPick', (p, context) =>
+      this.sequencerAction(p, ['cherry-pick', '--skip'], context)
     )
     this.dispatcher.onRequest('git.checkout', (p) => this.checkout(p))
     this.dispatcher.onRequest('git.localBranches', (p) => this.localBranches(p))
@@ -678,11 +678,21 @@ export class GitHandler {
 
   // Why: every subcommand here predates the Git 2.25 baseline (`merge --continue` 2.12,
   // `cherry-pick --skip` 2.22), so no capability probe or fallback is needed.
-  private async sequencerAction(params: Record<string, unknown>, args: string[]) {
+  private async sequencerAction(
+    params: Record<string, unknown>,
+    args: string[],
+    context?: RequestContext
+  ) {
     this.clearGitMutationReadCaches()
     const worktreePath = params.worktreePath as string
     try {
-      await this.git(args, worktreePath, { suppressEditor: true })
+      // Why: terminationBarrier so a cancelled request cannot settle while the
+      // sequencer child is still writing .git state a follow-up read would race.
+      await this.git(args, worktreePath, {
+        suppressEditor: true,
+        signal: context?.signal,
+        terminationBarrier: true
+      })
     } finally {
       this.clearGitMutationReadCaches()
     }

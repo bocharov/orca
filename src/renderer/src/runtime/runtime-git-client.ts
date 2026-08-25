@@ -25,7 +25,7 @@ import { getCommitMessageModelDiscoveryHostKeyForScope } from '../../../shared/c
 import type { GitHistoryOptions, GitHistoryResult } from '../../../shared/git-history'
 import { REBASE_FROM_BASE_RPC_TIMEOUT_MS } from '../../../shared/git-rebase-source'
 import { getRepoIdFromWorktreeId, splitWorktreeIdForFilesystem } from '../../../shared/worktree/id'
-import { callRuntimeRpc, getActiveRuntimeTarget } from './runtime-rpc-client'
+import { RuntimeRpcCallError, callRuntimeRpc, getActiveRuntimeTarget } from './runtime-rpc-client'
 import { toRuntimeWorktreeSelector } from './runtime-worktree-selector'
 
 export type RuntimeGenerateCommitMessageResult =
@@ -352,6 +352,33 @@ export async function abortRuntimeGitRebase(context: RuntimeGitContext): Promise
   )
 }
 
+// Why: adding an RPC method does not bump the protocol version, so a host that
+// predates the sequencer methods answers `method_not_found`. No older RPC can
+// advance the sequencer, so there is nothing to fall back to — surface an
+// upgrade prompt instead of a raw method-not-found error.
+async function callRuntimeSequencerRpc(
+  target: Parameters<typeof callRuntimeRpc>[0],
+  method: string,
+  worktreeId: string,
+  action: string
+): Promise<void> {
+  try {
+    await callRuntimeRpc(
+      target,
+      method,
+      { worktree: toRuntimeWorktreeSelector(worktreeId) },
+      { timeoutMs: 30_000 }
+    )
+  } catch (error) {
+    if (error instanceof RuntimeRpcCallError && error.code === 'method_not_found') {
+      throw new Error(
+        `This remote Orca host is running an older version that cannot ${action}. Update the host, then try again.`
+      )
+    }
+    throw error
+  }
+}
+
 export async function continueRuntimeGitMerge(context: RuntimeGitContext): Promise<void> {
   const target = getActiveRuntimeTarget(context.settings)
   if (target.kind === 'local' || !context.worktreeId) {
@@ -361,12 +388,7 @@ export async function continueRuntimeGitMerge(context: RuntimeGitContext): Promi
     })
     return
   }
-  await callRuntimeRpc(
-    target,
-    'git.continueMerge',
-    { worktree: toRuntimeWorktreeSelector(context.worktreeId) },
-    { timeoutMs: 30_000 }
-  )
+  await callRuntimeSequencerRpc(target, 'git.continueMerge', context.worktreeId, 'continue a merge')
 }
 
 export async function continueRuntimeGitRebase(context: RuntimeGitContext): Promise<void> {
@@ -378,11 +400,11 @@ export async function continueRuntimeGitRebase(context: RuntimeGitContext): Prom
     })
     return
   }
-  await callRuntimeRpc(
+  await callRuntimeSequencerRpc(
     target,
     'git.continueRebase',
-    { worktree: toRuntimeWorktreeSelector(context.worktreeId) },
-    { timeoutMs: 30_000 }
+    context.worktreeId,
+    'continue a rebase'
   )
 }
 
@@ -395,11 +417,11 @@ export async function continueRuntimeGitCherryPick(context: RuntimeGitContext): 
     })
     return
   }
-  await callRuntimeRpc(
+  await callRuntimeSequencerRpc(
     target,
     'git.continueCherryPick',
-    { worktree: toRuntimeWorktreeSelector(context.worktreeId) },
-    { timeoutMs: 30_000 }
+    context.worktreeId,
+    'continue a cherry-pick'
   )
 }
 
