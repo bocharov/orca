@@ -7,38 +7,31 @@
  * same pane, and both are "correct" from their own vantage point:
  *
  *  A) main's synthetic title spinner. `driveSyntheticTitleFromHook` starts a
- *     shared 80ms interval (src/main/index.ts:1947 SPINNER_FRAMES, :1948
- *     SPINNER_INTERVAL_MS) that injects `\x1b]0;<frame> <profile.workingLabel>\x07`
- *     (:2170, :2205). For an OMP-owned pane the profile is `omp`, so every tick
- *     asserts "<spinner> OMP".
+ *     shared 80ms interval (src/main/index.ts SPINNER_INTERVAL_MS) that injects
+ *     `\x1b]0;<frame> <profile.workingLabel>\x07`. For an OMP-owned pane the
+ *     profile is `omp`, so every tick asserts "<spinner> OMP".
  *  B) the OMP process itself, which is Pi underneath and emits Pi's own frames.
- *     "⠋ Pi" passes through untouched, and legacy "π …" frames are collapsed to
- *     a HARDCODED "Pi" by `normalizeTerminalTitle`
- *     (src/shared/agent-title-status.ts:135-144) — that collapse is
- *     identity-blind, so an OMP-owned pane still yields the literal "Pi".
  *
  * `pi` and `omp` share `titleIdentityGroup: 'pi-compatible'`
- * (src/shared/synthetic-agent-title.ts:45-56), so these are the SAME identity as
- * far as ownership is concerned — but neither writer is normalized to the tab's
- * launch owner before it reaches the store.
+ * (src/shared/synthetic-agent-title.ts), so to a pane these are the SAME agent.
  *
- * The churn suppressor that normally absorbs spinner noise is defeated here.
+ * The churn suppressor that normally absorbs spinner noise was defeated here.
  * `isDecorativeAgentTitleFrameChange` keys on `status:textWithoutSpinner`
- * (src/shared/agent-decorative-title-signature.ts:17): "⠋ OMP" -> `working:OMP`,
- * "⠙ Pi" -> `working:Pi`. The signatures differ, so every alternating frame is
- * classified as a MEANINGFUL change and commits — through
- * `applyTerminalTabTitleUpdates`
- * (src/renderer/src/store/slices/terminal-tab-title-batch.ts:183) for `tab.title`
- * (the string `resolveTerminalTabTitle` renders in the tab bar) and through
- * `setRuntimePaneTitle`
- * (src/renderer/src/store/terminals/terminal-tab-presentation.ts:145-172) for the
- * pane slot. At 80ms that is ~12 committed patches per second, per working OMP
- * tab, with a visibly flickering label.
+ * (src/shared/agent-decorative-title-signature.ts): "⠋ OMP" -> `working:OMP`,
+ * "⠙ Pi" -> `working:Pi`. Different signatures, so every alternating frame was
+ * classified as a MEANINGFUL change and committed — through
+ * `applyTerminalTabTitleUpdates` for `tab.title` and through
+ * `setRuntimePaneTitle` for the pane slot. At 80ms that is ~12 committed
+ * patches per second per working OMP tab, with a visibly flickering label.
  *
- * The oracle is commit COUNT, not exact text: the status never leaves 'working'
- * across the sequence, so a correctly owner-pinned title settles after the first
- * frame and every later frame is decoration. Both tests drive the REAL store
- * actions over the REAL frame text main emits.
+ * The fix collapses the identity GROUP inside the decorative signature, so a
+ * frame naming either member compares equal. Deliberately NOT a rewrite of the
+ * stored title: `runtimePaneTitlesByTabId` is also the Windows Shift+Enter
+ * byte-encoding input (keyboard-handlers.ts -> terminal-windows-shift-enter.ts),
+ * so normalizing titles at ingest destroys evidence other consumers read.
+ * Suppression changes only WHETHER a frame commits, never WHAT it says.
+ *
+ * The oracle is commit COUNT plus byte-identity of what does land.
  */
 import { describe, expect, it, vi } from 'vitest'
 
@@ -159,29 +152,76 @@ describe('OMP-owned tab title across interleaved OMP/Pi spinner frames', () => {
     ).toBe('OMP')
   })
 
-  // Why: relabeling is for frames naming a DIFFERENT group member. A frame that already names the
-  // owner carries its own status wording, so restating bare "OMP" as "OMP ready" would change a
-  // tab that never flapped — and the same guard keeps a plain Pi-owned tab byte-identical.
-  it.each([
-    ['omp', 'OMP'],
-    ['pi', 'Pi']
-  ] as const)('leaves a %s-owned tab’s own identity frames untouched', (launchAgent, label) => {
+  // Why: the fix must never rewrite what a frame says — `runtimePaneTitlesByTabId` feeds the
+  // Windows Shift+Enter encoding, so a normalized title there silently changes keyboard bytes.
+  it('stores every committed frame byte-for-byte, never a relabeled form', () => {
     const store = createTestStore()
-    seedStore(store, {
-      worktreesByRepo: { repo1: [makeWorktree({ id: WT, repoId: 'repo1', path: '/path/wt-omp' })] },
-      tabsByWorktree: {
-        [WT]: [makeTab({ id: TAB_ID, worktreeId: WT, title: 'Terminal 1', launchAgent })]
-      },
-      unifiedTabsByWorktree: {
-        [WT]: [makeUnifiedTab({ id: TAB_ID, worktreeId: WT, groupId: GROUP_ID })]
-      },
-      activeWorktreeId: WT
-    })
+    seedOmpTab(store)
 
-    for (const frame of [label, `${label} ready`, `⠋ ${label}`]) {
-      store.getState().setRuntimePaneTitle(TAB_ID, PANE_ID, frame)
-      expect(store.getState().runtimePaneTitlesByTabId[TAB_ID]?.[PANE_ID]).toBe(frame)
+    for (const frame of ['⠋ Pi', '⠋ OMP']) {
+      const fresh = createTestStore()
+      seedOmpTab(fresh)
+      fresh.getState().setRuntimePaneTitle(TAB_ID, PANE_ID, frame)
+      expect(fresh.getState().runtimePaneTitlesByTabId[TAB_ID]?.[PANE_ID]).toBe(frame)
+      fresh.getState().updateTabTitle(TAB_ID, frame)
+      expect(fresh.getState().tabsByWorktree[WT]?.[0]?.title).toBe(frame)
     }
+    void store
+  })
+
+  // Why: a multiplexer prefixes the pane's own title, so the identity sits mid-string. Anchored
+  // matching missed it and the flap survived under tmux/Zellij (#8032).
+  it('suppresses the flap under a multiplexer prefix', () => {
+    const store = createTestStore()
+    seedOmpTab(store)
+
+    let commits = 0
+    const unsubscribe = store.subscribe(() => {
+      commits += 1
+    })
+    for (let index = 0; index < 20; index += 1) {
+      const spinner = SPINNER_FRAMES[index % SPINNER_FRAMES.length]
+      store
+        .getState()
+        .setRuntimePaneTitle(TAB_ID, PANE_ID, `zsh | ${spinner} ${index % 2 === 0 ? 'OMP' : 'Pi'}`)
+    }
+    unsubscribe()
+
+    expect(commits).toBeLessThanOrEqual(1)
+  })
+
+  // Why: collapsing identity must not collapse STATE — a real working->idle transition still commits.
+  it('still commits a genuine status change', () => {
+    const store = createTestStore()
+    seedOmpTab(store)
+
+    store.getState().setRuntimePaneTitle(TAB_ID, PANE_ID, '⠋ OMP')
+    let commits = 0
+    const unsubscribe = store.subscribe(() => {
+      commits += 1
+    })
+    store.getState().setRuntimePaneTitle(TAB_ID, PANE_ID, 'OMP ready')
+    unsubscribe()
+
+    expect(commits).toBe(1)
+    expect(store.getState().runtimePaneTitlesByTabId[TAB_ID]?.[PANE_ID]).toBe('OMP ready')
+  })
+
+  // Why: a different agent taking the pane is a real identity change, not group decoration.
+  it('still commits a cross-group identity change', () => {
+    const store = createTestStore()
+    seedOmpTab(store)
+
+    store.getState().setRuntimePaneTitle(TAB_ID, PANE_ID, '⠋ OMP')
+    let commits = 0
+    const unsubscribe = store.subscribe(() => {
+      commits += 1
+    })
+    store.getState().setRuntimePaneTitle(TAB_ID, PANE_ID, '⠙ Codex')
+    unsubscribe()
+
+    expect(commits).toBe(1)
+    expect(store.getState().runtimePaneTitlesByTabId[TAB_ID]?.[PANE_ID]).toBe('⠙ Codex')
   })
 
   // Why: owner-pinning must stay scoped to bare identity frames. A semantic session title carries

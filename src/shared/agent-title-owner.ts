@@ -5,10 +5,7 @@ import {
   SYNTHETIC_AGENT_TITLE_PROFILES,
   type SyntheticAgentTitleProfile
 } from './synthetic-agent-title'
-import {
-  getPiCompatibleSyntheticAgentLabel,
-  isLegacyPiCompatibleTitle
-} from './pi-compatible-synthetic-title'
+import { isLegacyPiCompatibleTitle } from './pi-compatible-synthetic-title'
 import { getWrapperTitleSegments } from './terminal-title-wrapper-segments'
 
 type TitleProfileMatch = {
@@ -67,6 +64,23 @@ function getProfileForTitle(title: string): TitleProfileMatch | null {
  */
 export function hasCompatibleAgentTitleIdentity(title: string): boolean {
   return Boolean(getProfileForTitle(title)?.profile.titleIdentityGroup)
+}
+
+/**
+ * Replaces the agent-identity segment of a title with its identity-group name, leaving any
+ * wrapper prefix intact ("zsh | ⠋ Pi" and "zsh | ⠋ OMP" both become "zsh | pi-compatible").
+ *
+ * Why: members of a group are the same agent to a pane — OMP wraps Pi and both harnesses emit
+ * frames — so which one a frame names is decoration, not state. Callers comparing consecutive
+ * frames need them to compare equal; callers rendering the title must not use this.
+ */
+export function collapseCompatibleAgentTitleIdentity(title: string): string {
+  const source = getProfileForTitle(title)
+  const group = source?.profile.titleIdentityGroup
+  if (!group) {
+    return title
+  }
+  return title.replace(source.sourceTitle, group)
 }
 
 /**
@@ -167,31 +181,6 @@ export function normalizeCompatibleAgentTitleForOwner(
     return ownerProfile.idleLabel
   }
   return ownerProfile.workingLabel
-}
-
-/**
- * Relabels only a bare identity frame ("⠋ Pi", "Pi ready") to the owner's label.
- *
- * Why: a wrapped harness publishes the inner agent's identity (OMP wraps Pi), so those frames
- * alternate against the owner's own and defeat decorative-frame suppression at the store. A
- * semantic session title ("π - <session> - <cwd>") is left alone — it carries text no owner
- * profile can reproduce, so rewriting it to a generic label would lose real information.
- */
-export function relabelCompatibleAgentIdentityFrameForOwner(
-  title: string,
-  ownerAgentType: AgentType | null | undefined
-): string {
-  const frameLabel = getPiCompatibleSyntheticAgentLabel(title)
-  if (!frameLabel) {
-    return title
-  }
-  // Why: the frame already names the owner, so its own status wording is authoritative — rewriting
-  // it would restate bare "Pi" as "Pi ready" and change a Pi-owned tab that never flapped.
-  const ownerProfile = getSyntheticAgentTitleProfile(ownerAgentType)
-  if (ownerProfile?.workingLabel.toLowerCase() === frameLabel.toLowerCase()) {
-    return title
-  }
-  return normalizeCompatibleAgentTitleForOwner(title, ownerAgentType)
 }
 
 /**
