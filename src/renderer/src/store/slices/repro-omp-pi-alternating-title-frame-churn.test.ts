@@ -224,6 +224,27 @@ describe('OMP-owned tab title across interleaved OMP/Pi spinner frames', () => {
     expect(store.getState().runtimePaneTitlesByTabId[TAB_ID]?.[PANE_ID]).toBe('⠙ Codex')
   })
 
+  // Why: a legacy "π - <session> - <cwd>" frame is Pi-compatible too, but its text is real session
+  // state. Folding it into the group token would make two different sessions compare equal and
+  // suppress the change outright — the #16093 complaint, reintroduced through the signature.
+  it('still commits a change between two semantic session titles', () => {
+    const store = createTestStore()
+    seedOmpTab(store)
+
+    store.getState().setRuntimePaneTitle(TAB_ID, PANE_ID, 'π - fixing the sidebar - orca')
+    let commits = 0
+    const unsubscribe = store.subscribe(() => {
+      commits += 1
+    })
+    store.getState().setRuntimePaneTitle(TAB_ID, PANE_ID, 'π - writing the tests - orca')
+    unsubscribe()
+
+    expect(commits).toBe(1)
+    expect(store.getState().runtimePaneTitlesByTabId[TAB_ID]?.[PANE_ID]).toBe(
+      'π - writing the tests - orca'
+    )
+  })
+
   // Why: owner-pinning must stay scoped to bare identity frames. A semantic session title carries
   // text no agent profile can reproduce, so relabeling it to "OMP ready" would lose real
   // information — the complaint in #16093, which this fix must not reintroduce.

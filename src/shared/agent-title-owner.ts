@@ -5,7 +5,10 @@ import {
   SYNTHETIC_AGENT_TITLE_PROFILES,
   type SyntheticAgentTitleProfile
 } from './synthetic-agent-title'
-import { isLegacyPiCompatibleTitle } from './pi-compatible-synthetic-title'
+import {
+  getPiCompatibleSyntheticAgentLabel,
+  isLegacyPiCompatibleTitle
+} from './pi-compatible-synthetic-title'
 import { getWrapperTitleSegments } from './terminal-title-wrapper-segments'
 
 type TitleProfileMatch = {
@@ -67,20 +70,30 @@ export function hasCompatibleAgentTitleIdentity(title: string): boolean {
 }
 
 /**
- * Replaces the agent-identity segment of a title with its identity-group name, leaving any
- * wrapper prefix intact ("zsh | ⠋ Pi" and "zsh | ⠋ OMP" both become "zsh | pi-compatible").
+ * Replaces a bare agent-identity frame with its identity-group name, leaving any wrapper prefix
+ * intact ("zsh | ⠋ Pi" and "zsh | ⠙ OMP" both become "zsh | pi-compatible").
  *
  * Why: members of a group are the same agent to a pane — OMP wraps Pi and both harnesses emit
  * frames — so which one a frame names is decoration, not state. Callers comparing consecutive
- * frames need them to compare equal; callers rendering the title must not use this.
+ * frames need those to compare equal; callers rendering the title must not use this.
+ *
+ * Why only bare frames: a legacy "π - <session> - <cwd>" title is also Pi-compatible, but its
+ * text is real session state. Folding it would make two different sessions compare equal and
+ * suppress the change outright (#16093).
  */
 export function collapseCompatibleAgentTitleIdentity(title: string): string {
-  const source = getProfileForTitle(title)
-  const group = source?.profile.titleIdentityGroup
-  if (!group) {
-    return title
+  for (const segment of getWrapperTitleSegments(title)) {
+    const label = getPiCompatibleSyntheticAgentLabel(segment)
+    const group = label
+      ? SYNTHETIC_AGENT_TITLE_PROFILES[label.toLowerCase()]?.titleIdentityGroup
+      : undefined
+    if (!group) {
+      continue
+    }
+    const at = title.lastIndexOf(segment)
+    return at === -1 ? group : title.slice(0, at) + group
   }
-  return title.replace(source.sourceTitle, group)
+  return title
 }
 
 /**
