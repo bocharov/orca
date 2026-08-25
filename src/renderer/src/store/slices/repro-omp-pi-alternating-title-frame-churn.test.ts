@@ -3,14 +3,29 @@
  * between "OMP" and "Pi" at spinner cadence, committing a fresh store patch on
  * every frame.
  *
- * OMP wraps Pi, so TWO independent writers publish OSC title frames into the
- * same pane, and both are "correct" from their own vantage point:
+ * Both of those strings are manufactured by Orca. OMP emits NEITHER.
+ * Verified against oh-my-pi/packages/coding-agent/src/utils/title-generator.ts:
+ * `DEFAULT_TERMINAL_TITLE = "π"` (:25) and `buildTerminalTitleWithState` (:530-544)
+ * compose `π ⠋ <label>` / `π > <label>` / `π ! <label>` — always the π glyph,
+ * never the ASCII "Pi", never "OMP". And on an Orca-hosted pane OMP's native
+ * titler cedes entirely: Orca injects its own extension
+ * (src/main/pi/titlebar-extension-source.ts:21,44) which writes
+ * `π - <session> - <cwd>` and `⠋ π - <session> - <cwd>` every 80ms.
  *
- *  A) main's synthetic title spinner. `driveSyntheticTitleFromHook` starts a
- *     shared 80ms interval (src/main/index.ts SPINNER_INTERVAL_MS) that injects
- *     `\x1b]0;<frame> <profile.workingLabel>\x07`. For an OMP-owned pane the
- *     profile is `omp`, so every tick asserts "<spinner> OMP".
- *  B) the OMP process itself, which is Pi underneath and emits Pi's own frames.
+ * The two strings that actually reach this store come from two OTHER Orca parts:
+ *
+ *  A) `driveSyntheticTitleFromHook` (src/main/index.ts) injects
+ *     `\x1b]0;<frame> <profile.workingLabel>\x07` every 80ms. For an OMP-owned
+ *     pane `SYNTHETIC_AGENT_TITLE_PROFILES.omp.workingLabel` is "OMP", so every
+ *     tick asserts "<spinner> OMP".
+ *  B) `normalizeTerminalTitle` (src/shared/agent-title-status.ts:135-144) takes
+ *     the extension's own `⠋ π - session - cwd` and collapses it to the HARDCODED
+ *     literal "⠋ Pi" — discarding identity, session and cwd. That destroyed label
+ *     is issue #16093.
+ *
+ * So the flap is Orca mangling its own extension's output and then fighting the
+ * result with a third writer of its own. The fixtures below are post-normalization
+ * store values, not wire frames.
  *
  * `pi` and `omp` share `titleIdentityGroup: 'pi-compatible'`
  * (src/shared/synthetic-agent-title.ts), so to a pane these are the SAME agent.
@@ -19,17 +34,19 @@
  * `isDecorativeAgentTitleFrameChange` keys on `status:textWithoutSpinner`
  * (src/shared/agent-decorative-title-signature.ts): "⠋ OMP" -> `working:OMP`,
  * "⠙ Pi" -> `working:Pi`. Different signatures, so every alternating frame was
- * classified as a MEANINGFUL change and committed — through
- * `applyTerminalTabTitleUpdates` for `tab.title` and through
- * `setRuntimePaneTitle` for the pane slot. At 80ms that is ~12 committed
- * patches per second per working OMP tab, with a visibly flickering label.
+ * classified as MEANINGFUL and committed — through `applyTerminalTabTitleUpdates`
+ * for `tab.title` and `setRuntimePaneTitle` for the pane slot. At 80ms that is
+ * ~12 committed patches per second per working OMP tab, with a visible flicker.
  *
- * The fix collapses the identity GROUP inside the decorative signature, so a
- * frame naming either member compares equal. Deliberately NOT a rewrite of the
- * stored title: `runtimePaneTitlesByTabId` is also the Windows Shift+Enter
- * byte-encoding input (keyboard-handlers.ts -> terminal-windows-shift-enter.ts),
- * so normalizing titles at ingest destroys evidence other consumers read.
- * Suppression changes only WHETHER a frame commits, never WHAT it says.
+ * This suite pins the INTERIM mitigation: collapse the identity group inside the
+ * signature so the two Orca-made labels compare equal and neither commits.
+ * Deliberately NOT a rewrite of the stored title — `runtimePaneTitlesByTabId` is
+ * also the Windows Shift+Enter byte-encoding input (keyboard-handlers.ts ->
+ * terminal-windows-shift-enter.ts), so normalizing at ingest destroys evidence
+ * other consumers read (that was #16373, reverted here, and it cost us #16376).
+ *
+ * It does NOT restore the label `normalizeTerminalTitle` already destroyed; that
+ * needs the collapse itself fixed, which is tracked separately.
  *
  * The oracle is commit COUNT plus byte-identity of what does land.
  */
