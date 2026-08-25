@@ -7,6 +7,7 @@ import {
   type HeadlessPairedRuntimeHost
 } from './helpers/headless-paired-runtime-host'
 import { forceQuitElectronAppForE2E } from './helpers/electron-process-shutdown'
+import { focusMaterializedRemoteBrowserPane } from './helpers/materialized-remote-browser-pane'
 import { expect, test } from './helpers/orca-app'
 import {
   launchPairedElectronClient,
@@ -118,37 +119,6 @@ async function callEnvironment<TResult>(
     },
     { environmentId, method, params }
   ) as Promise<TResult>
-}
-
-/** Mirrors what the client does when the user opens (or reopens) a browser tab on a paired host. */
-async function attachRemoteBrowserPane(
-  page: Page,
-  environmentId: string,
-  worktreeId: string,
-  remotePageId: string
-): Promise<void> {
-  await page.evaluate(
-    ({ environmentId, worktreeId, remotePageId }) => {
-      const state = window.__store?.getState()
-      if (!state) {
-        throw new Error('client store unavailable')
-      }
-      const browserTab = state.createBrowserTab(worktreeId, 'about:blank', {
-        title: 'Ghost subscriber tab',
-        browserRuntimeEnvironmentId: environmentId
-      })
-      const pageId = browserTab.activePageId ?? browserTab.pageIds?.[0] ?? null
-      if (!pageId) {
-        throw new Error('client did not allocate a browser page id')
-      }
-      state.setRemoteBrowserPageHandle(pageId, { environmentId, remotePageId })
-      state.setActiveWorktree(worktreeId)
-      state.focusBrowserTabInWorktree(worktreeId, browserTab.id, {
-        surfacePane: true
-      })
-    },
-    { environmentId, worktreeId, remotePageId }
-  )
 }
 
 async function setClientWindowSize(
@@ -335,7 +305,14 @@ test('replaces a force-quit client screencast subscriber when the same device re
       .not.toBeNull()
     const unwatchedWidth = await readGuestViewportWidth(host.app, fixture.origin)
 
-    await attachRemoteBrowserPane(client.page, client.environmentId, worktreeId, remotePageId)
+    // The client mirrors the host's tab on its own; opening that pane is the whole user path. A
+    // second locally built pane for the same page would subscribe over this one — the runtime keeps
+    // one screencast per connection — and the viewport fingerprint below would name the wrong pane.
+    await focusMaterializedRemoteBrowserPane(client.page, {
+      environmentId: client.environmentId,
+      remotePageId,
+      worktreeId
+    })
     await expect(client.page.getByTestId('remote-browser-frame').first()).toBeVisible({
       timeout: 60_000
     })
@@ -385,12 +362,11 @@ test('replaces a force-quit client screencast subscriber when the same device re
     await setClientWindowSize(client.app, REJOINED_CLIENT_WINDOW)
     const rejoinedWorktreeId = await waitForWorktreeId(client.page)
     await forceServerPlacement(client.page)
-    await attachRemoteBrowserPane(
-      client.page,
-      client.environmentId,
-      rejoinedWorktreeId,
-      remotePageId
-    )
+    await focusMaterializedRemoteBrowserPane(client.page, {
+      environmentId: client.environmentId,
+      remotePageId,
+      worktreeId: rejoinedWorktreeId
+    })
 
     await expect(client.page.getByTestId('remote-browser-frame').first()).toBeVisible({
       timeout: 90_000
