@@ -315,6 +315,18 @@ describe('BrowserPaneOverlayLayer', () => {
     expect(markup).toContain('data-browser-pane-active="false"')
   })
 
+  // Why the style and not just mountedness: paintability drives the slot's `display`, and
+  // display:none is the exact park that stops Chromium producing frames. A mounted pane inside a
+  // display:none slot still goes dark, so mount assertions alone cannot see this regression.
+  it('paints the slot of a remotely viewed inactive browser pane', () => {
+    expect(slotDisplay('browser-b')).toBe('none')
+
+    cleanup()
+    mocks.remotelyViewedPageIds.add('page-b')
+
+    expect(slotDisplay('browser-b')).toBe('flex')
+  })
+
   // Why DOM order and not just presence: the host-row pane carries no guest and paints over
   // whichever webview the group was showing. Both siblings are absolutely positioned onto the same
   // anchor, so the only thing putting it on top is being last — a reorder is invisible to every
@@ -347,6 +359,17 @@ function renderOverlay({ isWorktreeActive }: { isWorktreeActive: boolean }): str
   return renderToStaticMarkup(
     <BrowserPaneOverlayLayer worktreeId="wt-1" isWorktreeActive={isWorktreeActive} />
   )
+}
+
+function slotDisplay(browserTabId: string): string {
+  const view = render(<BrowserPaneOverlayLayer worktreeId="wt-1" isWorktreeActive={true} />)
+  const slot = view.container.querySelector<HTMLElement>(
+    `[data-browser-overlay-tab-id="${browserTabId}"]`
+  )
+  if (!slot) {
+    throw new Error(`no overlay slot rendered for ${browserTabId}`)
+  }
+  return slot.style.display
 }
 
 function createState(): MockAppState {

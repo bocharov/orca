@@ -1,9 +1,21 @@
 import { useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../../../store'
-import { useBrowserMobileDriverForAny } from '../../../lib/pane-manager/browser-mobile-driver-state'
-import { useBrowserRemoteViewerForAny } from '../../../lib/pane-manager/browser-remote-viewer-state'
-import { useBrowserAutomationVisibilityForAny } from './browser-automation-visibility'
+import {
+  isBrowserPageMobileDriven,
+  onBrowserDriverChange,
+  useBrowserMobileDriverForAny
+} from '../../../lib/pane-manager/browser-mobile-driver-state'
+import {
+  isBrowserPageRemotelyViewed,
+  onBrowserRemoteViewerChange,
+  useBrowserRemoteViewerForAny
+} from '../../../lib/pane-manager/browser-remote-viewer-state'
+import {
+  isBrowserAutomationVisible,
+  onBrowserAutomationVisibilityChange,
+  useBrowserAutomationVisibilityForAny
+} from './browser-automation-visibility'
 
 // Why: Chromium never paints inside a display:none subtree, so a browser <webview> stops
 // emitting screencast frames if ANY ancestor is parked that way — the pane-level hatch in
@@ -40,6 +52,32 @@ export function useBrowserGuestPaintRetention(browserPageIds: readonly string[])
   const hasMobileDrivenBrowser = useBrowserMobileDriverForAny(browserPageIds)
   const hasRemotelyViewedBrowser = useBrowserRemoteViewerForAny(browserPageIds)
   return hasAutomationVisibleBrowser || hasMobileDrivenBrowser || hasRemotelyViewedBrowser
+}
+
+// Why one exported predicate rather than the same OR-list at each site: a hand-rolled copy stays
+// green when a term is added — nothing typechecks a site that never names the new signal — and the
+// remote-viewer term reached the panes while four copies in Terminal.tsx still had three terms.
+// browser-guest-retention-site-census.test.ts holds the sites to this function.
+export function browserPageNeedsPaintRetention(browserPageId: string): boolean {
+  return (
+    isBrowserAutomationVisible(browserPageId) ||
+    isBrowserPageMobileDriven(browserPageId) ||
+    isBrowserPageRemotelyViewed(browserPageId)
+  )
+}
+
+/** Fires whenever any retention term flips, for callers that cache a retention decision. */
+export function onBrowserGuestPaintRetentionChange(listener: () => void): () => void {
+  const removeListeners = [
+    onBrowserAutomationVisibilityChange(listener),
+    onBrowserDriverChange(listener),
+    onBrowserRemoteViewerChange(listener)
+  ]
+  return () => {
+    for (const removeListener of removeListeners) {
+      removeListener()
+    }
+  }
 }
 
 // Why: `enabled` gates a scan across every worktree's tabs, which only matters while the

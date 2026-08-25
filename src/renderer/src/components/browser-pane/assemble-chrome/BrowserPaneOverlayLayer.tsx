@@ -7,9 +7,7 @@ import type { Tab, TabGroup } from '../../../../../shared/tab-types'
 import BrowserPane from './browser-workspace-pane'
 import type { BrowserChromeShortcutScope } from '../describe-page/browser-page-types'
 import { tabGroupBodyAnchorName } from '../../tab-group/tab-group-body-anchor'
-import { useBrowserAutomationVisibilityForAny } from '../host-guest/browser-automation-visibility'
-import { useBrowserMobileDriverForAny } from '@/lib/pane-manager/browser-mobile-driver-state'
-import { useBrowserRemoteViewerForAny } from '@/lib/pane-manager/browser-remote-viewer-state'
+import { useBrowserGuestPaintRetention } from '../host-guest/browser-guest-paint-retention'
 import {
   isClientHostedBrowserRowSelectionLive,
   useClientHostedBrowserRowSelection,
@@ -60,12 +58,10 @@ const BrowserOverlaySlot = memo(function BrowserOverlaySlot({
     browserTab.pageIds && browserTab.pageIds.length > 0
       ? browserTab.pageIds
       : [browserTab.activePageId ?? browserTab.id]
-  const automationVisible = useBrowserAutomationVisibilityForAny(browserPageIds)
-  const mobileDriven = useBrowserMobileDriverForAny(browserPageIds)
-  const remotelyViewed = useBrowserRemoteViewerForAny(browserPageIds)
-  const isPaintable = isActive || automationVisible || mobileDriven || remotelyViewed
+  const needsGuestPaint = useBrowserGuestPaintRetention(browserPageIds)
+  const isPaintable = isActive || needsGuestPaint
   // Why: hidden worktrees keep lightweight overlay slots, but park their webviews unless a remote controller or viewer needs the guest.
-  const shouldMountPane = isWorktreeActive || automationVisible || mobileDriven || remotelyViewed
+  const shouldMountPane = isWorktreeActive || needsGuestPaint
   // Why: CSS anchor positioning pins the overlay to its owning group's body — a tab move only swaps positionAnchor, no measurement/state.
   // Orphan branch (no anchorName) stays display:none until the tab is reassigned or destroyed.
   const style: React.CSSProperties = useMemo(
