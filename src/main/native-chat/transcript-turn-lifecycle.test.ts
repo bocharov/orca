@@ -34,6 +34,23 @@ describe('kimi turn lifecycle', () => {
     })
   })
 
+  it('starts working on a user steer but ignores automation steers', () => {
+    const kimiSteer = (kind: string, time = 1787558235000): string =>
+      JSON.stringify({
+        type: 'turn.steer',
+        input: [{ type: 'text', text: 'actually, do this instead' }],
+        origin: { kind },
+        time
+      })
+    expect(decodeKimiTurnLifecycle(kimiSteer('user'), 'fallback')).toEqual({
+      state: 'working',
+      turnId: 'fallback',
+      timestamp: 1787558235000
+    })
+    expect(decodeKimiTurnLifecycle(kimiSteer('background_task'), 'fallback')).toBeNull()
+    expect(decodeKimiTurnLifecycle(kimiSteer('cron_job'), 'fallback')).toBeNull()
+  })
+
   it('ignores automation prompts and mid-turn tool_use steps', () => {
     expect(decodeKimiTurnLifecycle(kimiPrompt('background_task'), 'fallback')).toBeNull()
     expect(decodeKimiTurnLifecycle(kimiPrompt('cron_job'), 'fallback')).toBeNull()

@@ -100,6 +100,28 @@ describe('resolveSessionFilePath', () => {
     )
   })
 
+  it('resolves agents/main/wire.jsonl when a Kimi session has no state.json', async () => {
+    const root = await makeRoot('orca-native-chat-resolve-kimi-stateless-')
+    const kimiSessionsDir = join(root, 'kimi-sessions')
+    // A session killed before its first state.json persist still has its wire.
+    const sessionDir = await seedKimiSession(kimiSessionsDir, 'session_stateless', null, ['main'])
+
+    await expect(
+      resolveSessionFilePath('kimi', 'session_stateless', { kimiSessionsDir })
+    ).resolves.toBe(join(sessionDir, 'agents', 'main', 'wire.jsonl'))
+  })
+
+  it('returns null for a state-less Kimi session with no primary wire.jsonl', async () => {
+    const root = await makeRoot('orca-native-chat-resolve-kimi-stateless-sub-')
+    const kimiSessionsDir = join(root, 'kimi-sessions')
+    // Only a subagent wire: no state.json and no agents/main/wire.jsonl.
+    await seedKimiSession(kimiSessionsDir, 'session_delegate', null, ['coder'])
+
+    await expect(
+      resolveSessionFilePath('kimi', 'session_delegate', { kimiSessionsDir })
+    ).resolves.toBeNull()
+  })
+
   it('never resolves a Kimi subagent wire.jsonl for the session id', async () => {
     const root = await makeRoot('orca-native-chat-resolve-kimi-subagent-')
     // A session that only ever delegated: no primary wire.jsonl at all.

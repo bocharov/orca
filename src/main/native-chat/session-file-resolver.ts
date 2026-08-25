@@ -267,32 +267,44 @@ async function findCodexRolloutInDirs(
 // The hook's session id IS the session directory name (it keeps the `session_`
 // prefix), so find its state.json and let the shared kimi path module pick the
 // primary agent's wire file — a task subagent's own agents/<id>/wire.jsonl is
-// never the conversation the chat view should render.
+// never the conversation the chat view should render. state.json is optional:
+// a session killed before its first persist still has agents/main/wire.jsonl,
+// so the walk also collects that file as the fallback.
 async function resolveKimiSessionFile(
   sessionId: string,
   sessionsDir: string,
   signal?: AbortSignal
 ): Promise<string | null> {
   const stateFiles = await walkSessionFiles(sessionsDir, 'kimi', [], {
-    extensions: new Set(['.json']),
+    extensions: new Set(['.json', '.jsonl']),
     // Why: state.json sits exactly two levels down (wd dir, session dir), and
     // the session id IS the session directory name — so the only subtrees worth
-    // descending are the wd dirs (depth 0) and the one matching session dir.
-    // Everything else, including the agents/ and tasks/ subtrees, is pruned.
-    directoryPredicate: (name, depth) => depth === 0 || name === sessionId,
-    // Why: the dirname pin keeps a stray root/wd-level state.json (layout
-    // drift, a backup copy) from resolving a bogus agents/main path.
+    // descending are the wd dirs (depth 0), the one matching session dir, and
+    // its agents/main dir for the state-less fallback. Everything else,
+    // including the tasks/ and subagent subtrees, is pruned.
+    directoryPredicate: (name, depth) =>
+      depth === 0 ||
+      name === sessionId ||
+      (depth === 2 && name === 'agents') ||
+      (depth === 3 && name === 'main'),
+    // Why: the dirname pins keep a stray root/wd-level state.json (layout
+    // drift, a backup copy) or another agent's wire.jsonl from resolving a
+    // bogus path.
     filePredicate: (path) =>
-      basename(path) === 'state.json' && basename(dirname(path)) === sessionId,
+      (basename(path) === 'state.json' && basename(dirname(path)) === sessionId) ||
+      (basename(path) === 'wire.jsonl' &&
+        basename(dirname(path)) === 'main' &&
+        basename(dirname(dirname(path))) === 'agents' &&
+        basename(dirname(dirname(dirname(path)))) === sessionId),
     signal
   })
-  const statePath = stateFiles[0]
+  const statePath = stateFiles.find((path) => basename(path) === 'state.json')
   if (!statePath) {
-    return null
+    return stateFiles.find((path) => basename(path) === 'wire.jsonl') ?? null
   }
   // A missing/half-written state.json still resolves plausibly: the primary
   // agent id defaults to "main" (kimiPrimaryAgentWirePath).
-  const stateRecord = parseJsonObject(await wslGatedReadFile(statePath, 'utf-8', 'scan'))
+  const stateRecord = parseJsonObject(await wslGatedReadFile(statePath, 'utf-8', 'scan', signal))
   return kimiPrimaryAgentWirePath(statePath, stateRecord)
 }
 

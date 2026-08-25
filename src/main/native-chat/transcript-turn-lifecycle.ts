@@ -130,8 +130,9 @@ export function decodeClaudeTurnLifecycle(
 }
 
 /**
- * Kimi turn boundaries from wire.jsonl: a user-origin `turn.prompt` starts the
- * generation, `step.end` with finishReason `end_turn` completes it (finishReason
+ * Kimi turn boundaries from wire.jsonl: a user-origin `turn.prompt` (or
+ * `turn.steer`, which redirects the active generation) starts it, `step.end`
+ * with finishReason `end_turn` completes it (finishReason
  * `tool_use` continues the same turn — the agent loops for the tool result, so
  * it emits nothing, like Claude's tool_use rows), and `turn.cancel` interrupts.
  */
@@ -144,8 +145,11 @@ export function decodeKimiTurnLifecycle(
     return null
   }
   const timestamp = lifecycleTimestamp(record.time)
-  if (record.type === 'turn.prompt') {
-    // Why: steers/injections (background_task, cron_job, system_trigger) are not
+  if (record.type === 'turn.prompt' || record.type === 'turn.steer') {
+    // Why: a user-origin steer redirects the active generation, so it marks
+    // working just like a prompt — otherwise a prompt outside the bounded tail
+    // window leaves the chat stuck on an older completed state. Non-user
+    // steers/injections (background_task, cron_job, system_trigger) are not
     // user turns and must not flip the spinner on an idle session.
     if (extractString(asRecord(record.origin)?.kind) !== 'user') {
       return null
