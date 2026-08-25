@@ -4,6 +4,8 @@ import { waitForTerminalReplayWritesParsed } from '../replay-guard'
 import {
   POST_REPLAY_LIVE_AGENT_SNAPSHOT_RESET,
   POST_REPLAY_LIVE_SNAPSHOT_RESET,
+  POST_REPLAY_DEAD_TUI_RESET,
+  POST_REPLAY_REATTACH_RESET,
   RESET_AFTER_BYTE_GAP
 } from '../../../../../shared/terminal-mode-reset-profiles'
 import {
@@ -24,8 +26,35 @@ import { shouldWritePtyOutputForeground } from './foreground-output-scan'
 import { isRemoteRuntimePtyId } from './paired-parked-terminal-restore'
 import { restoredSnapshotPaintsPrintableContent } from '../restored-snapshot-coverage'
 import { recordTerminalFreezeBreadcrumb } from '../terminal-freeze-breadcrumbs'
+import { inspectRuntimeTerminalProcess } from '@/runtime/runtime-terminal-inspection'
+import { useAppStore } from '@/store'
+import { isShellProcess } from '../../../../../shared/shell-process-detection'
 
 import type { ConnectPanePtySession } from './connect-pane-pty-session'
+
+type HiddenRestoreForeground = 'shell' | 'other' | 'inconclusive'
+
+async function readHiddenRestoreForeground(ptyId: string): Promise<HiddenRestoreForeground> {
+  // Why: a remote inspection can wait on a dead connection; hidden replay must
+  // yield to live output instead of holding the structural lane for its RPC timeout.
+  const timeout = new Promise<HiddenRestoreForeground>((resolve) => {
+    const timer = setTimeout(() => resolve('inconclusive'), 750)
+    void inspectRuntimeTerminalProcess(useAppStore.getState().settings, ptyId)
+      .then((inspection) => {
+        clearTimeout(timer)
+        if (inspection.unavailable || !inspection.foregroundProcess) {
+          resolve('inconclusive')
+          return
+        }
+        resolve(isShellProcess(inspection.foregroundProcess) ? 'shell' : 'other')
+      })
+      .catch(() => {
+        clearTimeout(timer)
+        resolve('inconclusive')
+      })
+  })
+  return timeout
+}
 
 export function bindHiddenOutputRestoreSnapshot(session: ConnectPanePtySession): void {
   session.writeRestoreUnavailableWarning = function (): void {
@@ -66,6 +95,7 @@ export function bindHiddenOutputRestoreSnapshot(session: ConnectPanePtySession):
     session.hiddenOutputSnapshotScrollRestore = scrollRestore
     const colsBeforeReplay = session.pane.terminal.cols
     const rowsBeforeReplay = session.pane.terminal.rows
+    const paneOnAlternateScreenBeforeReplay = session.isPaneOnAlternateScreen()
     const hasSnapshotDimensions = hasPositiveTerminalDimensions(snapshot.cols, snapshot.rows)
     let skippedAltFrame = false
     try {
@@ -140,12 +170,25 @@ export function bindHiddenOutputRestoreSnapshot(session: ConnectPanePtySession):
               session.writeReplayData(replayChunk)
             }
           }
-          // Why: live agents own ?25l/?1004h; a forced ?1004l here would silence focus events until restart (agents enable focus reporting only at startup).
-          session.writeReplayData(
-            session.hasLiveAgentReattachStatusOrTitleSignal()
-              ? POST_REPLAY_LIVE_AGENT_SNAPSHOT_RESET
-              : POST_REPLAY_LIVE_SNAPSHOT_RESET
-          )
+          // Why: a normal-buffer snapshot proves the alt-screen owner is gone;
+          // hand mouse input back to the shell before the next pointer event.
+          // Only an alt-screen snapshot may preserve a live TUI's mouse modes.
+          const hasLiveAgent = session.hasLiveAgentReattachStatusOrTitleSignal()
+          // Legacy hosts may omit alternateScreen; retain a live pane's mode in that case.
+          const snapshotIsAlternateScreen =
+            snapshot.alternateScreen ?? paneOnAlternateScreenBeforeReplay
+          const hiddenRestoreForeground =
+            !hasLiveAgent && snapshotIsAlternateScreen
+              ? await readHiddenRestoreForeground(restorePtyId)
+              : 'inconclusive'
+          const postReplayReset = hasLiveAgent
+            ? POST_REPLAY_LIVE_AGENT_SNAPSHOT_RESET
+            : hiddenRestoreForeground === 'shell'
+              ? POST_REPLAY_DEAD_TUI_RESET
+              : snapshotIsAlternateScreen
+                ? POST_REPLAY_LIVE_SNAPSHOT_RESET
+                : POST_REPLAY_REATTACH_RESET
+          session.writeReplayData(postReplayReset)
           if (snapshot.pendingEscapeTailAnsi) {
             // Why last: snapshot taken mid-escape; re-arm as the FINAL replay write (any later ESC aborts it) so the live tail completes it, not render literally (Bug E / #7329).
             session.writeReplayData(snapshot.pendingEscapeTailAnsi)
