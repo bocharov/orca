@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BrowserWorkspace } from '../../../../../shared/browser-workspace-types'
 import {
   browserTabsVetoGuestEviction,
@@ -10,6 +10,7 @@ import {
   acquireBrowserAutomationVisibility,
   releaseBrowserAutomationVisibility
 } from './browser-automation-visibility'
+import { installBrowserPageDownloadActivityTracking } from '../navigate/browser-page-download-activity'
 
 // The retention budget DESTROYS a hidden worktree's guests rather than parking them, so a page a
 // paired client is streaming has to veto here too: a destroyed guest kills the screencast for good.
@@ -67,6 +68,40 @@ describe('browser guest eviction veto', () => {
     expect(browserTabsVetoGuestEviction(tabsFor(WATCHED_PAGE))).toBe(true)
     hydrateBrowserRemoteViewerPages([])
     expect(evictionRun(tabsFor(WATCHED_PAGE))).toContain(WATCHED_WORKTREE)
+  })
+
+  // Downloads are the one veto term that is not a paint term: parking a guest keeps the download
+  // alive, but eviction unregisters it and main cancels its downloads (tab-close semantics).
+  it('spares a page that is still writing a download', () => {
+    let emitDownloadRequested: (event: {
+      downloadId: string
+      browserPageId: string
+    }) => void = () => {}
+    const noop = (): void => {}
+    vi.stubGlobal('window', {
+      api: {
+        browser: {
+          onDownloadRequested: (callback: typeof emitDownloadRequested) => {
+            emitDownloadRequested = callback
+            return noop
+          },
+          onDownloadProgress: () => noop,
+          onDownloadFinished: () => noop
+        }
+      }
+    })
+    const stopDownloadTracking = installBrowserPageDownloadActivityTracking()
+    try {
+      expect(browserTabsVetoGuestEviction(tabsFor(WATCHED_PAGE))).toBe(false)
+      expect(evictionRun(tabsFor(WATCHED_PAGE))).toContain(WATCHED_WORKTREE)
+
+      emitDownloadRequested({ downloadId: 'dl-1', browserPageId: WATCHED_PAGE })
+      expect(browserTabsVetoGuestEviction(tabsFor(WATCHED_PAGE))).toBe(true)
+      expect(evictionRun(tabsFor(WATCHED_PAGE))).not.toContain(WATCHED_WORKTREE)
+    } finally {
+      stopDownloadTracking()
+      vi.unstubAllGlobals()
+    }
   })
 
   it('holds the veto for a viewer on a non-active page of the same tab', () => {
