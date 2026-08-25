@@ -208,6 +208,76 @@ describe('SourceControlBranchContextRow', () => {
     expect(markup).toContain('Retry')
   })
 
+  // A branch rebased onto origin/main still tracks its pre-rebase remote branch.
+  // Beside `→ origin/main`, ↑25 ↓5 read as counts against origin/main — false,
+  // and the whole reason the row was confusing.
+  it('puts the upstream arrows on the head line, never beside the base ref', () => {
+    const markup = renderToStaticMarkup(
+      <SourceControlBranchContextRow
+        summary={{ ...readySummary, baseRef: 'refs/remotes/origin/main', commitsAhead: 5 }}
+        compareBaseRef={null}
+        headDisplay={{ kind: 'branch', branchName: 'feature/rebased' }}
+        upstreamStatus={{
+          hasUpstream: true,
+          upstreamName: 'origin/feature',
+          ahead: 25,
+          behind: 5
+        }}
+        onChangeBaseRef={vi.fn()}
+        onRetry={vi.fn()}
+      />
+    )
+
+    // Arrows land between the branch name and the base line, i.e. on the head line.
+    // Anchor on the base-ref button, not on 'origin/main' — the group's
+    // head→base aria-label repeats the base ref at the top of the markup.
+    const headIndex = markup.indexOf('data-testid="source-control-head-identity"')
+    const baseIndex = markup.indexOf('aria-label="Change base ref:')
+    expect(markup.indexOf('↑25')).toBeGreaterThan(headIndex)
+    expect(markup.indexOf('↑25')).toBeLessThan(baseIndex)
+    expect(markup.indexOf('↓5')).toBeLessThan(baseIndex)
+    // The base line carries no counts at all, so nothing can be misread against it.
+    expect(markup.slice(baseIndex)).not.toContain('↑')
+    expect(markup.slice(baseIndex)).not.toContain('↓')
+  })
+
+  it('names the upstream ref on every count for screen readers', () => {
+    const markup = renderToStaticMarkup(
+      <SourceControlBranchContextRow
+        summary={readySummary}
+        compareBaseRef={null}
+        headDisplay={{ kind: 'branch', branchName: 'feature/rebased' }}
+        upstreamStatus={{
+          hasUpstream: true,
+          upstreamName: 'origin/feature',
+          ahead: 25,
+          behind: 5
+        }}
+        onChangeBaseRef={vi.fn()}
+        onRetry={vi.fn()}
+      />
+    )
+
+    expect(markup).toContain('aria-label="25 commits ahead of origin/feature"')
+    expect(markup).toContain('aria-label="5 commits behind origin/feature"')
+  })
+
+  it('folds the upstream arrows onto the base line when there is no head identity', () => {
+    const markup = renderToStaticMarkup(
+      <SourceControlBranchContextRow
+        summary={readySummary}
+        compareBaseRef={null}
+        headDisplay={null}
+        upstreamStatus={{ hasUpstream: true, upstreamName: 'origin/feature', ahead: 3, behind: 0 }}
+        onChangeBaseRef={vi.fn()}
+        onRetry={vi.fn()}
+      />
+    )
+
+    expect(markup).toContain('↑3')
+    expect(markup).toContain('aria-label="3 commits ahead of origin/feature"')
+  })
+
   it('renders a compact external review link when a manual URL is available', () => {
     const markup = renderToStaticMarkup(
       <SourceControlBranchContextRow
@@ -319,35 +389,33 @@ describe('SourceControlBranchContextRow branch line total', () => {
     }
   })
 
-  // Lines measure the branch's work, commits measure the comparison, so each sits
-  // on the line that names its subject. Adjacency is what made them read as one
-  // number in the first place.
-  it('puts the chip on the head line, ahead of the base line and its commit count', () => {
-    const markup = renderWithLineTotal(
-      { added: 8259, removed: 670, mergeBase: 'base' },
-      {
-        ...readySummary,
-        commitsAhead: 2
-      }
-    )
-    const headIndex = markup.indexOf('data-testid="source-control-head-identity"')
-    const chipIndex = markup.indexOf('data-testid="source-control-branch-line-total"')
-    const aheadIndex = markup.indexOf('↑2')
-    const reviewIndex = markup.indexOf('aria-label="Open review page in browser"')
-
-    expect(headIndex).toBeGreaterThan(-1)
-    expect(chipIndex).toBeGreaterThan(headIndex)
-    expect(aheadIndex).toBeGreaterThan(chipIndex)
-    expect(reviewIndex).toBeGreaterThan(aheadIndex)
-  })
-
-  it('keeps the ahead count out of the line-total colors', () => {
+  // The compare base is quantified in files (section heading) and lines (this
+  // chip), never in a second arrow pair that would sit next to the upstream one.
+  it('shows no commit count against the compare base', () => {
     const markup = renderWithLineTotal(
       { added: 8259, removed: 670, mergeBase: 'base' },
       { ...readySummary, commitsAhead: 2 }
     )
-    // The `↑2` span must carry the muted class, not added-green — two adjacent
-    // green numbers counting different units is the bug this guards.
+
+    expect(markup).not.toContain('↑2')
+    expect(markup).not.toContain('↑')
+    expect(markup).not.toContain('↓')
+  })
+
+  it('keeps the upstream counts out of the line-total colors', () => {
+    const markup = renderToStaticMarkup(
+      <SourceControlBranchContextRow
+        summary={readySummary}
+        compareBaseRef={null}
+        headDisplay={{ kind: 'branch', branchName: 'feature/line-total' }}
+        upstreamStatus={{ hasUpstream: true, upstreamName: 'origin/feature', ahead: 2, behind: 0 }}
+        branchLineTotal={{ added: 8259, removed: 670, mergeBase: 'base' }}
+        onChangeBaseRef={vi.fn()}
+        onRetry={vi.fn()}
+      />
+    )
+
+    // Two adjacent green numbers counting different units is the bug this guards.
     const aheadSpan = markup.slice(
       markup.lastIndexOf('<span', markup.indexOf('↑2')),
       markup.indexOf('↑2')

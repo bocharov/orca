@@ -13,9 +13,10 @@ import type { WorktreeGitIdentityDisplay } from '@/lib/worktree-git-identity-dis
 import { SourceControlHeaderIconButton } from './header-icon-button'
 import { SourceControlBranchLineTotalChip } from './branch-line-total-chip'
 import {
-  buildSourceControlBranchContextStats,
+  buildSourceControlUpstreamDivergenceStats,
   formatSourceControlRefLabel,
-  resolveSourceControlDisplayedBaseRef
+  resolveSourceControlDisplayedBaseRef,
+  type SourceControlBranchContextStat
 } from './branch-context-stats'
 
 function BaseRefButton({
@@ -47,24 +48,20 @@ function BaseRefButton({
   )
 }
 
-function ContextStat({
-  stat
-}: {
-  stat: ReturnType<typeof buildSourceControlBranchContextStats>[number]
-}): React.JSX.Element {
-  const className = cn(
-    'shrink-0 tabular-nums text-muted-foreground',
-    stat.tone === 'muted' && 'text-muted-foreground/70'
-  )
-
-  if (!stat.title) {
-    return <span className={className}>{stat.label}</span>
-  }
-
+function ContextStat({ stat }: { stat: SourceControlBranchContextStat }): React.JSX.Element {
+  // Why: aria-label on an unfocusable span is never announced, so the upstream
+  // ref these counts measure against would exist only for sighted hover users.
+  // tabIndex also lets keyboard users open the tooltip, like HeadIdentity.
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className={className}>{stat.label}</span>
+        <span
+          className="shrink-0 rounded-sm tabular-nums text-muted-foreground/70 outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          tabIndex={0}
+          aria-label={stat.title}
+        >
+          {stat.label}
+        </span>
       </TooltipTrigger>
       <TooltipContent side="bottom" sideOffset={6}>
         {stat.title}
@@ -392,24 +389,7 @@ export function SourceControlBranchContextRow({
     )
   }
 
-  const stats = buildSourceControlBranchContextStats({
-    summary,
-    baseRef: displayedBaseRef,
-    upstreamStatus
-  })
-
-  const trailing = (
-    <>
-      {stats.length > 0 ? (
-        <span className="inline-flex shrink-0 items-center gap-1.5">
-          {stats.map((stat) => (
-            <ContextStat key={stat.key} stat={stat} />
-          ))}
-        </span>
-      ) : null}
-      <ManualReviewLinkButton url={manualReviewUrl} />
-    </>
-  )
+  const upstreamStats = buildSourceControlUpstreamDivergenceStats(upstreamStatus)
 
   return (
     <CompareFlowGroup flowLabel={flowLabel} className="min-w-0 text-[11px] text-muted-foreground">
@@ -419,8 +399,18 @@ export function SourceControlBranchContextRow({
         baseLabel={baseLabel}
         onChangeBaseRef={onChangeBaseRef}
         changeBaseTitle={changeBaseTitle}
-        trailing={trailing}
-        headTrailing={<SourceControlBranchLineTotalChip branchLineTotal={branchLineTotal} />}
+        trailing={<ManualReviewLinkButton url={manualReviewUrl} />}
+        // Why: ↑↓ measure this branch against the branch it tracks, so they sit on
+        // the line that names it. Beside `→ origin/main` they read as counts
+        // against origin/main, which is false whenever the two refs differ.
+        headTrailing={
+          <>
+            {upstreamStats.map((stat) => (
+              <ContextStat key={stat.key} stat={stat} />
+            ))}
+            <SourceControlBranchLineTotalChip branchLineTotal={branchLineTotal} />
+          </>
+        }
       />
     </CompareFlowGroup>
   )

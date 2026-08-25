@@ -10,12 +10,14 @@ import type { SourceControlTreeNode } from '../../source-control-tree'
 import type { SourceControlRowOpenEvent } from './split-open'
 import { BranchEntryRow } from './branch-entry-row'
 import { SectionHeader } from './section-header'
+import { formatSourceControlRefLabel } from '../panel/branch-context-stats'
 import { SourceControlBranchTreeDirectoryRow } from './tree-directory-rows'
 import { SourceControlVirtualFileList } from './virtual-file-list'
 
 export function SourceControlBranchSection({
   branchSummary,
   filteredBranchEntries,
+  totalBranchEntryCount,
   collapsedSections,
   toggleSection,
   sourceControlViewMode,
@@ -33,6 +35,7 @@ export function SourceControlBranchSection({
 }: {
   branchSummary: GitBranchCompareSummary
   filteredBranchEntries: GitBranchChangeEntry[]
+  totalBranchEntryCount: number
   collapsedSections: Set<string>
   toggleSection: (section: string) => void
   sourceControlViewMode: SourceControlViewMode
@@ -52,6 +55,27 @@ export function SourceControlBranchSection({
   ) => void
   diffCommentCountByPath: Map<string, number>
 }): React.JSX.Element {
+  const baseRef = branchSummary.baseRef?.trim()
+  const fileCount = filteredBranchEntries.length
+  // Why: the heading counts files that differ from the compare base, not every
+  // file the branch ever touched — a rebased branch makes the two read alike.
+  // A narrowing filter changes what the number means, so the label goes silent
+  // rather than claim the filtered count is the branch total.
+  const countTitle =
+    baseRef && fileCount === totalBranchEntryCount
+      ? fileCount === 1
+        ? translate(
+            'auto.components.right.sidebar.SourceControl.c3f9a1d806',
+            '1 file changed vs {{value0}}',
+            { value0: formatSourceControlRefLabel(baseRef) }
+          )
+        : translate(
+            'auto.components.right.sidebar.SourceControl.d6e2b8c704',
+            '{{value0}} files changed vs {{value1}}',
+            { value0: fileCount, value1: formatSourceControlRefLabel(baseRef) }
+          )
+      : undefined
+
   return (
     <div>
       <SectionHeader
@@ -59,7 +83,8 @@ export function SourceControlBranchSection({
           'auto.components.right.sidebar.SourceControl.d7ae61269b',
           'Committed on Branch'
         )}
-        count={filteredBranchEntries.length}
+        count={fileCount}
+        countTitle={countTitle}
         isCollapsed={collapsedSections.has('branch')}
         onToggle={() => toggleSection('branch')}
         actions={

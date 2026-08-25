@@ -3,31 +3,31 @@ import type { GitUpstreamStatus } from '../../../../../../shared/git-status-type
 import type { WorktreeGitIdentityDisplay } from '@/lib/worktree-git-identity-display'
 import { translate } from '@/i18n/i18n'
 
-function formatAheadOfBaseTitle(count: number, baseRef: string): string {
+function formatAheadOfTitle(count: number, ref: string): string {
   return count === 1
     ? translate(
         'auto.components.right.sidebar.SourceControl.f9b2441bb6',
         '1 commit ahead of {{value0}}',
-        { value0: baseRef }
+        { value0: ref }
       )
     : translate(
         'auto.components.right.sidebar.SourceControl.b715ef615b',
         '{{value0}} commits ahead of {{value1}}',
-        { value0: count, value1: baseRef }
+        { value0: count, value1: ref }
       )
 }
 
-function formatBehindBaseTitle(count: number, baseRef: string): string {
+function formatBehindOfTitle(count: number, ref: string): string {
   return count === 1
     ? translate(
         'auto.components.right.sidebar.SourceControl.c1a8f3e204',
         '1 commit behind {{value0}}',
-        { value0: baseRef }
+        { value0: ref }
       )
     : translate(
         'auto.components.right.sidebar.SourceControl.d2b9g4f315',
         '{{value0}} commits behind {{value1}}',
-        { value0: count, value1: baseRef }
+        { value0: count, value1: ref }
       )
 }
 
@@ -38,8 +38,7 @@ function formatBehindBaseTitle(count: number, baseRef: string): string {
 export type SourceControlBranchContextStat = {
   key: string
   label: string
-  title?: string
-  tone: 'default' | 'muted'
+  title: string
 }
 
 export function resolveSourceControlDisplayedBaseRef(
@@ -91,62 +90,31 @@ function resolveUpstreamDisplayLabel(upstreamStatus: GitUpstreamStatus): string 
   return translate('auto.components.right.sidebar.SourceControl.f3a1b8c204', 'upstream')
 }
 
-export function buildSourceControlBranchContextStats({
-  summary,
-  baseRef,
-  upstreamStatus
-}: {
-  summary: GitBranchCompareSummary
-  baseRef: string
-  upstreamStatus?: GitUpstreamStatus
-}): SourceControlBranchContextStat[] {
-  if (summary.status !== 'ready') {
+// ↑/↓ mean one thing only: this branch against the branch it tracks — the same
+// reading every other git UI gives them.
+export function buildSourceControlUpstreamDivergenceStats(
+  upstreamStatus: GitUpstreamStatus | undefined
+): SourceControlBranchContextStat[] {
+  if (!upstreamStatus?.hasUpstream) {
     return []
   }
 
+  const ref = resolveUpstreamDisplayLabel(upstreamStatus)
   const stats: SourceControlBranchContextStat[] = []
-  const baseLabel = formatSourceControlRefLabel(baseRef)
-  const hasUpstream = Boolean(upstreamStatus?.hasUpstream)
-  const upstreamLabel =
-    hasUpstream && upstreamStatus ? resolveUpstreamDisplayLabel(upstreamStatus) : null
 
-  if (hasUpstream && upstreamStatus && upstreamLabel != null) {
-    if (upstreamStatus.ahead > 0) {
-      stats.push({
-        key: 'upstream-ahead',
-        label: `↑${upstreamStatus.ahead}`,
-        title: formatAheadOfBaseTitle(upstreamStatus.ahead, upstreamLabel),
-        tone: 'muted'
-      })
-    }
-    if (upstreamStatus.behind > 0) {
-      stats.push({
-        key: 'upstream-behind',
-        label: `↓${upstreamStatus.behind}`,
-        title: formatBehindBaseTitle(upstreamStatus.behind, upstreamLabel),
-        tone: 'muted'
-      })
-    }
+  if (upstreamStatus.ahead > 0) {
+    stats.push({
+      key: 'upstream-ahead',
+      label: `↑${upstreamStatus.ahead}`,
+      title: formatAheadOfTitle(upstreamStatus.ahead, ref)
+    })
   }
-
-  const commitsAhead = summary.commitsAhead
-  if (typeof commitsAhead === 'number' && commitsAhead > 0) {
-    // Why: only collapse compare-ahead into upstream-ahead when both describe the
-    // same ref and count — equal numbers against different targets must both show.
-    const sameTargetAsUpstream =
-      hasUpstream &&
-      upstreamStatus != null &&
-      upstreamLabel != null &&
-      upstreamLabel === baseLabel &&
-      commitsAhead === upstreamStatus.ahead
-    if (!sameTargetAsUpstream) {
-      stats.push({
-        key: 'compare-ahead',
-        label: `↑${commitsAhead}`,
-        title: formatAheadOfBaseTitle(commitsAhead, baseLabel),
-        tone: 'muted'
-      })
-    }
+  if (upstreamStatus.behind > 0) {
+    stats.push({
+      key: 'upstream-behind',
+      label: `↓${upstreamStatus.behind}`,
+      title: formatBehindOfTitle(upstreamStatus.behind, ref)
+    })
   }
 
   return stats

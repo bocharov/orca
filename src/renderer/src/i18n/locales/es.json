@@ -10571,6 +10571,8 @@
             "7a09d7f9d2": "base",
             "383cf92c73": "árbol",
             "d7ae61269b": "Commits en la rama",
+            "c3f9a1d806": "1 archivo cambiado respecto a {{value0}}",
+            "d6e2b8c704": "{{value0}} archivos cambiados respecto a {{value1}}",
             "48a003c1b1": "Cambios preparados",
             "d4ef4bafc5": "Cambios",
             "522f44dce5": "Archivos sin seguimiento",
