@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import { SourceControlBranchSection } from './source-control/listing/branch-section'
@@ -36,7 +38,7 @@ function render(
       collapsedTreeDirs={new Set()}
       toggleTreeDir={vi.fn()}
       currentWorktreeId="wt-1"
-      worktreePath="/tmp/wt-1"
+      worktreePath={join(tmpdir(), 'wt-1')}
       revealInExplorer={vi.fn()}
       activeConnectionId={null}
       openCommittedDiff={vi.fn()}

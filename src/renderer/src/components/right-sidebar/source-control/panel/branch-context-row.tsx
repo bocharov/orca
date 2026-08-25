@@ -300,6 +300,11 @@ export function SourceControlBranchContextRow({
 }): React.JSX.Element | null {
   const displayedBaseRef = resolveSourceControlDisplayedBaseRef(summary, compareBaseRef)
 
+  // Why: ↑↓ measure HEAD against its upstream, not against the compare base, so
+  // they stay valid (and rendered) while compare is missing, loading, or failed.
+  const upstreamStats = buildSourceControlUpstreamDivergenceStats(upstreamStatus)
+  const upstreamStatNodes = upstreamStats.map((stat) => <ContextStat key={stat.key} stat={stat} />)
+
   // Why: no base → still show HEAD identity so branch/detached never vanish when
   // compare isn't configured (replaces the separate identity row from #10215).
   if (!displayedBaseRef) {
@@ -307,8 +312,11 @@ export function SourceControlBranchContextRow({
       return null
     }
     return (
-      <div className="min-w-0 text-[11px] text-muted-foreground">
-        <HeadIdentity display={headDisplay} />
+      <div className="flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
+        <span className="flex min-w-0 flex-1 items-center">
+          <HeadIdentity display={headDisplay} />
+        </span>
+        {upstreamStatNodes}
       </div>
     )
   }
@@ -343,6 +351,7 @@ export function SourceControlBranchContextRow({
           changeBaseTitle={changeBaseTitle}
           leading={<Loader2 className="size-3 shrink-0 animate-spin" aria-hidden="true" />}
           trailing={<ManualReviewLinkButton url={manualReviewUrl} />}
+          headTrailing={upstreamStatNodes}
         />
         <span className="sr-only">
           {translate('auto.components.right.sidebar.SourceControl.11b5dd8e41', 'Comparing against')}
@@ -373,6 +382,7 @@ export function SourceControlBranchContextRow({
               />
             </>
           }
+          headTrailing={upstreamStatNodes}
         />
         {/* Why: pl-4 under the base line so the error reads as compare state, not HEAD. */}
         <span
@@ -389,8 +399,6 @@ export function SourceControlBranchContextRow({
     )
   }
 
-  const upstreamStats = buildSourceControlUpstreamDivergenceStats(upstreamStatus)
-
   return (
     <CompareFlowGroup flowLabel={flowLabel} className="min-w-0 text-[11px] text-muted-foreground">
       <StackedCompareFlow
@@ -405,9 +413,7 @@ export function SourceControlBranchContextRow({
         // against origin/main, which is false whenever the two refs differ.
         headTrailing={
           <>
-            {upstreamStats.map((stat) => (
-              <ContextStat key={stat.key} stat={stat} />
-            ))}
+            {upstreamStatNodes}
             <SourceControlBranchLineTotalChip branchLineTotal={branchLineTotal} />
           </>
         }
