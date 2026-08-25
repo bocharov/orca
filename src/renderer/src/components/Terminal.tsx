@@ -44,21 +44,17 @@ import { hasFeatureInteraction } from '../../../shared/feature-interactions'
 import BrowserPane from './browser-pane/BrowserPane'
 import { RetainedBrowserPaneOverlayLayer } from './browser-pane/assemble-chrome/BrowserPaneOverlayLayer'
 import EmulatorPaneOverlayLayer from './emulator-pane/EmulatorPaneOverlayLayer'
-import {
-  isBrowserAutomationVisible,
-  onBrowserAutomationVisibilityChange,
-  useBrowserAutomationVisibilityForAny
-} from './browser-pane/host-guest/browser-automation-visibility'
-import {
-  isBrowserPageMobileDriven,
-  onBrowserDriverChange,
-  useBrowserMobileDriverForAny
-} from '@/lib/pane-manager/browser-mobile-driver-state'
 import { useClientHostedBrowserRows } from '@/lib/pane-manager/client-hosted-browser-row-state'
 import {
+  onBrowserGuestPaintRetentionChange,
   useAnyBrowserGuestNeedsPaint,
+  useBrowserGuestPaintRetention,
   useWorktreeBrowserPageIds
 } from './browser-pane/host-guest/browser-guest-paint-retention'
+import {
+  shouldKeepHiddenWorktreeSurfacePaintable,
+  shouldMountRetainedBrowserOverlay
+} from './browser-pane/host-guest/browser-worktree-surface-paintability'
 import TerminalPaneOverlayLayer from './terminal-pane/TerminalPaneOverlayLayer'
 import {
   collectBrowserWebviewIds,
@@ -67,15 +63,12 @@ import {
   destroyWorktreeBrowserGuests
 } from '../store/slices/browser-webview-cleanup'
 import {
-  browserTabVisibilityPageIds,
+  browserTabsVetoGuestEviction,
   selectBrowserGuestEvictionWorktreeIds,
   touchBrowserGuestWorktreeRecency,
   worktreeHoldsLiveBrowserGuests
 } from './browser-pane/host-guest/browser-guest-worktree-retention'
-import {
-  hasActiveBrowserPageDownload,
-  installBrowserPageDownloadActivityTracking
-} from './browser-pane/navigate/browser-page-download-activity'
+import { installBrowserPageDownloadActivityTracking } from './browser-pane/navigate/browser-page-download-activity'
 import { hasLiveBrowserGuest } from './browser-pane/host-guest/webview-registry'
 import {
   handleSwitchRecentTab,
@@ -1203,12 +1196,10 @@ function Terminal(): React.JSX.Element | null {
       setBrowserGuestRetentionRevision((revision) => revision + 1)
     }
     const removeDownloadTracking = installBrowserPageDownloadActivityTracking(invalidateRetention)
-    const removeAutomationTracking = onBrowserAutomationVisibilityChange(invalidateRetention)
-    const removeMobileTracking = onBrowserDriverChange(invalidateRetention)
+    const removePaintRetentionTracking = onBrowserGuestPaintRetentionChange(invalidateRetention)
     return () => {
       removeDownloadTracking()
-      removeAutomationTracking()
-      removeMobileTracking()
+      removePaintRetentionTracking()
     }
   }, [])
   // Browser-guest retention budget (#12137 follow-up): hidden worktrees keep
@@ -1253,20 +1244,10 @@ function Terminal(): React.JSX.Element | null {
           state.browserPagesByWorkspace,
           hasLiveBrowserGuest
         ),
-      // Why these vetoes: automation/mobile keeps a hidden guest painted for a
-      // remote controller mid-drive, and main cancels a page's active downloads
-      // when its guest unregisters (tab-close semantics). Terminal state never
-      // vetoes — eviction only destroys guests and leaves the surface (panes,
-      // watchers) alone.
+      // Why a shared veto: eviction destroys guests outright, so every reason a guest has to stay
+      // alive vetoes here. Terminal state never vetoes — the surface (panes, watchers) is untouched.
       isEvictable: (worktreeId) =>
-        !(state.browserTabsByWorktree[worktreeId] ?? []).some((tab) =>
-          browserTabVisibilityPageIds(tab).some(
-            (pageId) =>
-              isBrowserAutomationVisible(pageId) ||
-              isBrowserPageMobileDriven(pageId) ||
-              hasActiveBrowserPageDownload(pageId)
-          )
-        )
+        !browserTabsVetoGuestEviction(state.browserTabsByWorktree[worktreeId] ?? [])
     })
     for (const worktreeId of evictedWorktreeIds) {
       destroyWorktreeBrowserGuests(
@@ -2864,10 +2845,11 @@ const WorktreeSplitSurface = React.memo(function WorktreeSplitSurface({
   activationDeferredMountTabIds: ReadonlySet<string> | null
 }): React.JSX.Element {
   const browserPageIds = useWorktreeBrowserPageIds(worktreeId)
-  const hasAutomationVisibleBrowser = useBrowserAutomationVisibilityForAny(browserPageIds)
-  const hasMobileDrivenBrowser = useBrowserMobileDriverForAny(browserPageIds)
-  const shouldKeepPaintable =
-    shouldMeasureHiddenWorktree || hasAutomationVisibleBrowser || hasMobileDrivenBrowser
+  const needsBrowserGuestPaint = useBrowserGuestPaintRetention(browserPageIds)
+  const shouldKeepPaintable = shouldKeepHiddenWorktreeSurfacePaintable({
+    shouldMeasureHiddenWorktree,
+    needsBrowserGuestPaint
+  })
 
   return (
     <div
@@ -2903,12 +2885,11 @@ const WorktreeSplitSurface = React.memo(function WorktreeSplitSurface({
       <RetainedBrowserPaneOverlayLayer
         worktreeId={worktreeId}
         isWorktreeActive={isVisible}
-        mountEligible={
-          isVisible ||
-          backgroundMountTabIds === null ||
-          hasAutomationVisibleBrowser ||
-          hasMobileDrivenBrowser
-        }
+        mountEligible={shouldMountRetainedBrowserOverlay({
+          isWorktreeVisible: isVisible,
+          hasDeferredBackgroundMounts: backgroundMountTabIds !== null,
+          needsBrowserGuestPaint
+        })}
       />
       {isVisible || backgroundMountTabIds === null ? (
         <EmulatorPaneOverlayLayer worktreeId={worktreeId} isWorktreeActive={isVisible} />

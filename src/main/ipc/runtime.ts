@@ -103,6 +103,11 @@ export function registerRuntimeHandlers(runtime: OrcaRuntimeService): void {
     }
   )
 
+  ipcMain.removeHandler('runtime:getBrowserRemoteViewerPages')
+  ipcMain.handle('runtime:getBrowserRemoteViewerPages', (): string[] =>
+    runtime.getBrowserRemoteViewerPages()
+  )
+
   // Why: the renderer holds these rows in memory only, so a reload has nothing to restore from.
   ipcMain.removeHandler('runtime:getClientHostedBrowserRows')
   ipcMain.handle('runtime:getClientHostedBrowserRows', (): ClientHostedBrowserRowsEvent[] =>

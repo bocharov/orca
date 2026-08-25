@@ -379,6 +379,11 @@ import type {
 import type { ExactWorkerProviderSession } from '../../shared/orchestration-worker-output'
 import { applyBrowserSessionTabSelection } from './browser-session-tab-selection-snapshot'
 import type { BrowserSessionTabSelectionOptions } from './browser-tab-create-publication'
+import {
+  resolveBrowserDriverAfterMobileRelease,
+  screencastSubscriberDrivesAsMobile,
+  type BrowserScreencastSubscriber
+} from './browser-screencast-driver-scope'
 import type { RuntimeClientEvent } from '../../shared/runtime-client-events'
 import { toRuntimeActivateWorktreeEvent } from '../../shared/runtime-client-events'
 import {
@@ -2273,6 +2278,9 @@ type RuntimeNotifier = {
     resolution: { text: string; createdAt: number }
   ): void
   browserDriverChanged?(browserPageId: string, driver: RuntimeBrowserDriverState): void
+  // Why: separate from the driver above because watching and driving are independent — a page can
+  // be watched by a desktop client with no driver at all, and that page must still paint.
+  browserRemoteViewersChanged?(browserPageId: string, hasRemoteViewers: boolean): void
   // Why: pages placed on a paired client never reach the host renderer's tab model, so the host
   // has no row for them unless main pushes one. Ephemeral and host-local — see
   // src/shared/client-hosted-browser-rows.ts.
@@ -3293,14 +3301,16 @@ export class OrcaRuntimeService {
   // deviceToken (multi-screen mobile).
   private subscriptionsByConnection = new Map<string, Set<string>>()
   private subscriptionConnectionByEntry = new Map<string, string>()
+  // Why: a connection record replaces whatever else that socket was streaming regardless of who
+  // is driving, so it deliberately carries no pairing scope.
   private activeBrowserScreencastsByConnection = new Map<
     string,
-    { cancel: (emitEnd?: boolean) => void; done: Promise<void>; connectionKey: string }
+    Omit<BrowserScreencastSubscriber, 'drivesAsMobile'>
   >()
-  private activeBrowserScreencastsByPage = new Map<
-    string,
-    Set<{ cancel: (emitEnd?: boolean) => void; done: Promise<void>; connectionKey: string }>
-  >()
+  private activeBrowserScreencastsByPage = new Map<string, Set<BrowserScreencastSubscriber>>()
+  // Why: paint retention, not control — Chromium stops painting a display:none guest, so the host
+  // renderer must keep any page a remote client is watching mounted even when nobody drives it.
+  private browserRemoteViewerPages = new Set<string>()
   // Why: mobile clients subscribe to desktop notifications via
   // notifications.subscribe. This set enables fan-out — each connected
   // mobile client gets its own listener, and dispatchMobileNotification
@@ -15148,10 +15158,31 @@ export class OrcaRuntimeService {
     this.notifier?.browserDriverChanged?.(browserPageId, next)
   }
 
+  getBrowserRemoteViewerPages(): string[] {
+    return Array.from(this.browserRemoteViewerPages)
+  }
+
+  /** Republishes from the live subscriber set, so every add and remove has one settling point. */
+  private publishBrowserRemoteViewers(browserPageId: string): void {
+    const watched = (this.activeBrowserScreencastsByPage.get(browserPageId)?.size ?? 0) > 0
+    if (this.browserRemoteViewerPages.has(browserPageId) === watched) {
+      return
+    }
+    if (watched) {
+      this.browserRemoteViewerPages.add(browserPageId)
+    } else {
+      this.browserRemoteViewerPages.delete(browserPageId)
+    }
+    this.notifier?.browserRemoteViewersChanged?.(browserPageId, watched)
+  }
+
   reclaimBrowserForDesktop(browserPageId: string): boolean {
     this.setBrowserDriver(browserPageId, { kind: 'desktop' })
     for (const stream of this.activeBrowserScreencastsByPage.get(browserPageId) ?? []) {
-      stream.cancel(true)
+      // Why: take-back revokes the phone's control, not a co-viewing desktop/web client's stream.
+      if (stream.drivesAsMobile) {
+        stream.cancel(true)
+      }
     }
     return true
   }
@@ -38494,6 +38525,7 @@ export class OrcaRuntimeService {
     options: {
       connectionId?: string
       pairedDeviceId?: string
+      clientKind?: 'mobile' | 'runtime'
       sendBinary?: (bytes: Uint8Array<ArrayBufferLike>) => boolean | void
       signal?: AbortSignal
       emit: (result: BrowserScreencastResult) => void
@@ -38507,6 +38539,7 @@ export class OrcaRuntimeService {
     }
 
     const connectionKey = options.connectionId ?? 'local'
+    const drivesAsMobile = screencastSubscriberDrivesAsMobile(options.clientKind)
     let existingStream = this.activeBrowserScreencastsByConnection.get(connectionKey)
     while (existingStream) {
       existingStream.cancel()
@@ -38520,11 +38553,7 @@ export class OrcaRuntimeService {
     let screencast: Awaited<ReturnType<RuntimeBrowserCommands['browserScreencast']>> | null = null
     let registeredSubscriptionId: string | null = null
     let activeBrowserPageId: string | null = null
-    let activePageStream: {
-      cancel: (emitEnd?: boolean) => void
-      done: Promise<void>
-      connectionKey: string
-    } | null = null
+    let activePageStream: BrowserScreencastSubscriber | null = null
     let ended = false
     let cancelledBeforeStart = false
     let readyEmitted = false
@@ -38580,18 +38609,18 @@ export class OrcaRuntimeService {
       activePageStream = {
         cancel,
         done: activeDone,
-        connectionKey
+        connectionKey,
+        drivesAsMobile
       }
       const pageStreams =
         this.activeBrowserScreencastsByPage.get(activeBrowserPageId) ??
-        new Set<{
-          cancel: (emitEnd?: boolean) => void
-          done: Promise<void>
-          connectionKey: string
-        }>()
+        new Set<BrowserScreencastSubscriber>()
       pageStreams.add(activePageStream)
       this.activeBrowserScreencastsByPage.set(activeBrowserPageId, pageStreams)
-      this.setBrowserDriver(activeBrowserPageId, { kind: 'mobile', clientId: connectionKey })
+      this.publishBrowserRemoteViewers(activeBrowserPageId)
+      if (drivesAsMobile) {
+        this.setBrowserDriver(activeBrowserPageId, { kind: 'mobile', clientId: connectionKey })
+      }
 
       // Why: screencast frames are connection-scoped; tie Page.stopScreencast to the exact socket so dropped connections don't leave Chromium streaming.
       this.registerSubscriptionCleanup(
@@ -38628,12 +38657,12 @@ export class OrcaRuntimeService {
             this.activeBrowserScreencastsByPage.delete(activeBrowserPageId)
           }
         }
+        this.publishBrowserRemoteViewers(activeBrowserPageId)
         const driver = this.getBrowserDriver(activeBrowserPageId)
         if (driver.kind === 'mobile' && driver.clientId === connectionKey) {
-          const fallback = Array.from(pageStreams ?? []).at(-1)
           this.setBrowserDriver(
             activeBrowserPageId,
-            fallback ? { kind: 'mobile', clientId: fallback.connectionKey } : { kind: 'idle' }
+            resolveBrowserDriverAfterMobileRelease(pageStreams ?? [])
           )
         }
       }

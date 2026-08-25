@@ -11,6 +11,7 @@ import {
   useBrowserDriverForPage,
   useBrowserMobileDrivenPageIds
 } from '@/lib/pane-manager/browser-mobile-driver-state'
+import { useBrowserRemotelyViewedPageIds } from '@/lib/pane-manager/browser-remote-viewer-state'
 import { useContextualTour } from '@/components/contextual-tours/use-contextual-tour'
 import { getBrowserPageRuntimeEnvironmentId } from '../describe-page/browser-page-url-display'
 import type { BrowserChromeShortcutScope } from '../describe-page/browser-page-types'
@@ -52,6 +53,7 @@ export default function BrowserPane({
   const browserPageIds = useMemo(() => browserPages.map((page) => page.id), [browserPages])
   const automationVisiblePageIds = useBrowserAutomationVisiblePageIds(browserPageIds)
   const mobileDrivenPageIds = useBrowserMobileDrivenPageIds(browserPageIds)
+  const remotelyViewedPageIds = useBrowserRemotelyViewedPageIds(browserPageIds)
   // Why: inactive webviews must stay mounted in their original DOM parent; unmounting/reparenting loses form text and SPA state.
   const renderedBrowserPages = useMemo(
     () =>
@@ -168,6 +170,7 @@ export default function BrowserPane({
                   }
                   isAutomationVisible={automationVisiblePageIds.has(page.id)}
                   isMobileDriven={mobileDrivenPageIds.has(page.id)}
+                  isRemotelyViewed={remotelyViewedPageIds.has(page.id)}
                   inputLocked={activeBrowserDriver.kind === 'mobile'}
                   onUpdatePageState={updateBrowserPageState}
                   onSetUrl={setBrowserPageUrl}

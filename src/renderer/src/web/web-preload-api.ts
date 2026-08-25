@@ -1433,6 +1433,8 @@ function createRuntimeApi(): NonNullable<Partial<PreloadApi>['runtime']> {
     getTerminalFitOverrides: () => Promise.resolve([]),
     getTerminalDrivers: () => Promise.resolve([]),
     getBrowserDrivers: () => Promise.resolve([]),
+    // Why: the web client never hosts a guest webview, so it has nothing to keep paintable.
+    getBrowserRemoteViewerPages: () => Promise.resolve([]),
     // Why: client-hosted rows describe pages a paired desktop renders for a host; the web client
     // is never that host.
     getClientHostedBrowserRows: () => Promise.resolve([]),
@@ -1442,6 +1444,7 @@ function createRuntimeApi(): NonNullable<Partial<PreloadApi>['runtime']> {
     onTerminalDriverChanged: () => noopUnsubscribe,
     onNativeChatLaunchDraftResolved: () => noopUnsubscribe,
     onBrowserDriverChanged: () => noopUnsubscribe,
+    onBrowserRemoteViewersChanged: () => noopUnsubscribe,
     onClientHostedBrowserRowsChanged: () => noopUnsubscribe
   }
 }

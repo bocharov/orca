@@ -4557,6 +4557,8 @@ const api = {
         driver: RuntimeBrowserDriverState
       }[]
     > => ipcRenderer.invoke('runtime:getBrowserDrivers'),
+    getBrowserRemoteViewerPages: (): Promise<string[]> =>
+      ipcRenderer.invoke('runtime:getBrowserRemoteViewerPages'),
     getClientHostedBrowserRows: (): Promise<ClientHostedBrowserRowsEvent[]> =>
       ipcRenderer.invoke('runtime:getClientHostedBrowserRows'),
     restoreTerminalFit: (ptyId: string): Promise<{ restored: boolean }> =>
@@ -4618,6 +4620,19 @@ const api = {
       ) => callback(data)
       ipcRenderer.on('runtime:browserDriverChanged', listener)
       return () => ipcRenderer.removeListener('runtime:browserDriverChanged', listener)
+    },
+    onBrowserRemoteViewersChanged: (
+      callback: (event: { browserPageId: string; hasRemoteViewers: boolean }) => void
+    ): (() => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        data: {
+          browserPageId: string
+          hasRemoteViewers: boolean
+        }
+      ) => callback(data)
+      ipcRenderer.on('runtime:browserRemoteViewersChanged', listener)
+      return () => ipcRenderer.removeListener('runtime:browserRemoteViewersChanged', listener)
     },
     onClientHostedBrowserRowsChanged: (
       callback: (event: ClientHostedBrowserRowsEvent) => void
