@@ -18,6 +18,7 @@ export type ParsedHookEnvelope = {
   hookPayloadRecord: Record<string, unknown>
   tabId?: string
   worktreeId?: string
+  hookCwd?: string
   launchToken?: string
 }
 
@@ -74,6 +75,7 @@ export function parseHookEnvelope(
     hookPayloadRecord: hookPayload as Record<string, unknown>,
     tabId,
     worktreeId: readEnvelopeString(record, 'worktreeId'),
+    hookCwd: readEnvelopeString(record, 'hookCwd'),
     launchToken: readEnvelopeString(record, 'launchToken')
   }
 }

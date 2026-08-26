@@ -321,6 +321,10 @@ function sanitizeHydratedEntry(
   if (worktreeId !== undefined && (typeof worktreeId !== 'string' || worktreeId.length === 0)) {
     return null
   }
+  const hookCwd = record.hookCwd
+  if (hookCwd !== undefined && (typeof hookCwd !== 'string' || hookCwd.length === 0)) {
+    return null
+  }
   const receivedAt = record.receivedAt
   if (typeof receivedAt !== 'number' || !Number.isFinite(receivedAt) || receivedAt <= 0) {
     return null
@@ -372,6 +376,7 @@ function sanitizeHydratedEntry(
     source,
     tabId: typeof tabId === 'string' ? tabId : undefined,
     worktreeId: typeof worktreeId === 'string' ? worktreeId : undefined,
+    hookCwd: typeof hookCwd === 'string' ? hookCwd : undefined,
     connectionId,
     hasExplicitPrompt: record.hasExplicitPrompt === true ? true : undefined,
     hookEventName: typeof record.hookEventName === 'string' ? record.hookEventName : undefined,
@@ -454,6 +459,7 @@ function toAgentStatusIpcPayload(entry: EnrichedAgentHookEventPayload): AgentSta
     ...(entry.launchToken ? { launchToken: entry.launchToken } : {}),
     tabId: entry.tabId,
     worktreeId: entry.worktreeId,
+    hookCwd: entry.hookCwd,
     connectionId: entry.connectionId,
     receivedAt: entry.receivedAt,
     stateStartedAt: entry.stateStartedAt,
@@ -2238,6 +2244,7 @@ export class AgentHookServer {
       paneKey: string
       tabId?: string
       worktreeId?: string
+      hookCwd?: string
       env?: string
       version?: string
       launchToken?: string
@@ -2337,6 +2344,10 @@ export class AgentHookServer {
     const worktreeId =
       envelope.worktreeId !== undefined && envelope.worktreeId.trim().length > 0
         ? envelope.worktreeId.trim()
+        : undefined
+    const hookCwd =
+      typeof envelope.hookCwd === 'string' && envelope.hookCwd.trim().length > 0
+        ? envelope.hookCwd.trim()
         : undefined
     const promptInteractionKey =
       typeof envelope.promptInteractionKey === 'string' &&
@@ -2453,6 +2464,7 @@ export class AgentHookServer {
       launchToken: statusDisposition === 'restart' ? undefined : envelope.launchToken,
       tabId,
       worktreeId,
+      hookCwd,
       connectionId: trimmedConnectionId,
       hasExplicitPrompt: envelope.hasExplicitPrompt === true ? true : undefined,
       promptInteractionKey,
