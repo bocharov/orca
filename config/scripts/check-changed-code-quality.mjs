@@ -155,9 +155,9 @@ export function collectBaseLineBlocks(root, comparisonBase, files = null) {
   // (it filters to ACMRTUB), so read every path the diff touches, deletions included.
   const paths =
     files ??
-    splitNullDelimited(
-      runGit(root, ['diff', '--name-only', '-z', comparisonBase, '--'])
-    ).filter((file) => SOURCE_FILE_PATTERN.test(file))
+    splitNullDelimited(runGit(root, ['diff', '--name-only', '-z', comparisonBase, '--'])).filter(
+      (file) => SOURCE_FILE_PATTERN.test(file)
+    )
   const blocks = []
   for (const file of paths) {
     const result = spawnSync('git', ['show', `${comparisonBase}:${file}`], {
@@ -168,7 +168,12 @@ export function collectBaseLineBlocks(root, comparisonBase, files = null) {
     if (result.status !== 0 || typeof result.stdout !== 'string') {
       continue
     }
-    blocks.push(result.stdout.split(/\r?\n/).map(normalizeSourceLine).filter((line) => line !== ''))
+    blocks.push(
+      result.stdout
+        .split(/\r?\n/)
+        .map(normalizeSourceLine)
+        .filter((line) => line !== '')
+    )
   }
   return blocks
 }
@@ -178,17 +183,32 @@ export function isMovedCode(highlightedLines, baseBlocks) {
   if (needle.length === 0) {
     return false
   }
+  // Why a near-match rather than an exact contiguous one: a split moves a block
+  // verbatim but a diagnostic's span often reaches past it — most commonly to a
+  // hook dependency array, which legitimately grows when closure variables become
+  // props. Requiring every line to match would report the moved body as new. So:
+  // the block must still start at the same line in the base and appear IN ORDER,
+  // and nearly all of it must be present. Genuinely new code shares neither the
+  // anchor nor the ordering, so it stays reported.
+  const MIN_COVERAGE = 0.9
   return baseBlocks.some((rawHaystack) => {
     const haystack = rawHaystack.map(normalizeSourceLine).filter((line) => line !== '')
-    for (let start = 0; start + needle.length <= haystack.length; start += 1) {
-      let matched = true
-      for (let offset = 0; offset < needle.length; offset += 1) {
-        if (haystack[start + offset] !== needle[offset]) {
-          matched = false
-          break
+    for (let start = 0; start < haystack.length; start += 1) {
+      if (haystack[start] !== needle[0]) {
+        continue
+      }
+      let matched = 1
+      let cursor = start + 1
+      for (let index = 1; index < needle.length && cursor < haystack.length; index += 1) {
+        while (cursor < haystack.length && haystack[cursor] !== needle[index]) {
+          cursor += 1
+        }
+        if (cursor < haystack.length) {
+          matched += 1
+          cursor += 1
         }
       }
-      if (matched) {
+      if (matched / needle.length >= MIN_COVERAGE) {
         return true
       }
     }
@@ -222,7 +242,10 @@ export function diagnosticTouchesAddedLines(
     if (lineRange === null || !overlapsAddedLines(lineRange.start, lineRange.end, ranges)) {
       return false
     }
-    return !isMovedCode(diagnosticHighlightedLines(root, diagnostic.filename, label.span), baseBlocks)
+    return !isMovedCode(
+      diagnosticHighlightedLines(root, diagnostic.filename, label.span),
+      baseBlocks
+    )
   })
 }
 

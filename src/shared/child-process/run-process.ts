@@ -7,6 +7,10 @@ import {
 import { buildWindowsCmdShimCommandLine, isCmdInterpretedProgram } from './windows-command-line'
 import { forceTerminateProcessTree, signalProcessTree } from './process-tree-termination'
 
+import { createOutputSink } from './bounded-output-sink'
+
+export type ChildProcessHandle = ChildProcess
+
 export type SpawnedProcess = ChildProcess
 
 /**
@@ -35,13 +39,19 @@ export type ProcessSpec = {
   cwd?: string
   env?: NodeJS.ProcessEnv
   /** Kill the process (and, on Windows, its console) after this long. */
-  timeoutMs?: number
+  timeoutMs?: number | null
   /** Written to stdin then closed. Omit to leave stdin empty and closed. */
   input?: string
   /** Cap on captured stdout/stderr; output past it is discarded. */
   maxOutputBytes?: number
   /** Kills the process when aborted; the result still reports the exit. */
   signal?: AbortSignal
+  /** Keep the child in its own POSIX process group for tree termination. */
+  detached?: boolean
+  /** Preserve a caller-owned Windows command line such as a cmd.exe invocation. */
+  windowsVerbatimArguments?: boolean
+  /** Streaming callers may suppress child output for auxiliary processes. */
+  stdio?: NodeSpawnOptions['stdio']
   /** Kill the whole process tree and do not settle until termination is verified. */
   terminationBarrier?: boolean | ProcessTerminationBarrier
 }
@@ -100,12 +110,14 @@ export function resolveSpawn(spec: ProcessSpec, platform: NodeJS.Platform): Reso
   const base: NodeSpawnOptions = {
     cwd: spec.cwd,
     env: spec.env,
-    stdio: ['pipe', 'pipe', 'pipe'],
+    stdio: spec.stdio ?? ['pipe', 'pipe', 'pipe'],
     // Why unconditional: Orca's main process is GUI-subsystem and owns no
     // console, so every console-subsystem child it starts gets a fresh visible
     // conhost that takes foreground — keystrokes typed into an Orca terminal at
     // that moment land in the black box instead.
     windowsHide: true,
+    detached: spec.detached,
+    windowsVerbatimArguments: spec.windowsVerbatimArguments,
     // Why never `shell: true`: it concatenates arguments without escaping (Node
     // itself warns DEP0190) and it silently makes windowsHide a no-op.
     shell: false,
@@ -139,33 +151,6 @@ export function resolveSpawn(spec: ProcessSpec, platform: NodeJS.Platform): Reso
 export function spawnProcess(spec: ProcessSpec): ChildProcess {
   const resolved = resolveSpawn(spec, process.platform)
   return nodeSpawn(resolved.file, [...resolved.args], resolved.options)
-}
-
-/**
- * Collects output up to a cap, so a chatty child cannot grow the heap.
- *
- * Accepts strings as well as buffers: a stream someone called `setEncoding` on
- * emits strings, and concatenating those as buffers throws inside a `data`
- * handler, where the rejection has nowhere to go and the caller just hangs.
- */
-function createOutputSink(maxBytes: number): {
-  write: (chunk: Buffer | string) => void
-  text: () => string
-} {
-  const chunks: Buffer[] = []
-  let bytes = 0
-  return {
-    write(raw) {
-      const chunk = Buffer.isBuffer(raw) ? raw : Buffer.from(raw)
-      const remaining = maxBytes - bytes
-      if (remaining <= 0) {
-        return
-      }
-      chunks.push(chunk.length > remaining ? chunk.subarray(0, remaining) : chunk)
-      bytes += chunk.length
-    },
-    text: () => Buffer.concat(chunks).toString('utf8')
-  }
 }
 
 /**
@@ -345,11 +330,14 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
       graceTimer.unref?.()
     }
 
-    const timer = setTimeout(() => {
-      timedOut = true
-      stopAndSettle()
-    }, spec.timeoutMs ?? DEFAULT_PROCESS_TIMEOUT_MS)
-    timer.unref?.()
+    const timer =
+      spec.timeoutMs === null
+        ? undefined
+        : setTimeout(() => {
+            timedOut = true
+            stopAndSettle()
+          }, spec.timeoutMs ?? DEFAULT_PROCESS_TIMEOUT_MS)
+    timer?.unref?.()
 
     // Why the same escalation: an aborted caller has stopped waiting, so an
     // unkillable child must not keep the promise alive on their behalf either.
@@ -420,7 +408,7 @@ export function runProcessSync(spec: ProcessSpec): ProcessResult {
   const result = nodeSpawnSync(resolved.file, [...resolved.args], {
     ...resolved.options,
     input: spec.input,
-    timeout: spec.timeoutMs ?? DEFAULT_PROCESS_TIMEOUT_MS,
+    timeout: spec.timeoutMs === null ? undefined : (spec.timeoutMs ?? DEFAULT_PROCESS_TIMEOUT_MS),
     maxBuffer: spec.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES,
     encoding: 'buffer'
   })
