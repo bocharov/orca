@@ -30,6 +30,7 @@ import {
   writeHooksJson,
   type HooksConfig
 } from './installer-utils'
+import { buildPosixAgentHookPostCommand } from './hook-post-command'
 import { POSIX_HOOK_STDIN_DRAIN_COMMAND } from './hook-stdin-contract'
 import { wrapRuntimeHomeHookCommand } from './runtime-home-hook-command'
 import {
@@ -609,7 +610,7 @@ describe('wrapPosixHookCommand', () => {
 })
 
 const qualifiedWindowsPowerShellCommand =
-  /^[A-Za-z]:\/[^"]*\/System32\/WindowsPowerShell\/v1\.0\/powershell\.exe -NoProfile -WindowStyle Hidden -EncodedCommand \S+$/
+  /^[A-Za-z]:\/[^"]*\/System32\/WindowsPowerShell\/v1\.0\/powershell\.exe -NoProfile -EncodedCommand \S+$/
 
 function decodeWindowsHookCommand(command: string): string {
   const encodedCommand = command.match(/ -EncodedCommand (\S+)$/)?.[1]
@@ -641,6 +642,17 @@ describe('wrapWindowsHookCommand', () => {
     })
     expect(decodeWindowsHookCommand(command)).toContain(
       "$env:ORCA_COPILOT_HOOK_EVENT = 'UserPromptSubmit'; if (Test-Path"
+    )
+  })
+
+  it('emits fallback stdout when the managed script is missing', () => {
+    const command = wrapWindowsHookCommand(
+      'C:\\hooks\\cursor-hook.cmd',
+      {},
+      { fallbackStdout: '{"permission":"allow"}' }
+    )
+    expect(decodeWindowsHookCommand(command)).toContain(
+      'Write-Output \'{"permission":"allow"}\'; exit 0'
     )
   })
 
@@ -756,7 +768,7 @@ describe('wrapRuntimeHomeHookCommand', () => {
     // applies to the exact same string (#16003).
     const command = wrapRuntimeHomeHookCommand('claude-hook')
 
-    expect(command).toContain('powershell.exe" -NoProfile -WindowStyle Hidden -EncodedCommand ')
+    expect(command).toContain('powershell.exe" -NoProfile -EncodedCommand ')
     expect(command).not.toMatch(/-ExecutionPolicy/i)
   })
 
@@ -875,6 +887,29 @@ describe('buildWindowsAgentHookPostCommand', () => {
 
     expect(command).toMatch(/^"%SystemRoot%\\System32\\curl\.exe"/)
     expect(command).not.toMatch(/^curl\.exe\b/)
+  })
+})
+
+describe('buildPosixAgentHookPostCommand', () => {
+  it('uses raw JSON only when the listener advertises support', () => {
+    const command = buildPosixAgentHookPostCommand('claude').join('\n')
+
+    expect(command).toContain('ORCA_AGENT_HOOK_TRANSPORT:-}')
+    expect(command).toContain('raw-json-v1')
+    expect(command).toContain('command -v base64')
+    expect(command).toContain('command -v tr')
+    expect(command).toContain('Content-Type: application/json')
+    expect(command).toContain('X-Orca-Agent-Hook-Meta-Encoding: base64')
+    expect(command).toContain('X-Orca-Agent-Hook-Meta: ${orca_hook_metadata}')
+    expect(command).toContain("printf '%s\\037%s\\037%s\\037%s\\037%s\\037%s\\037%s\\037%s'")
+    expect(command).toContain('$ORCA_PANE_KEY')
+    expect(command).toContain('$ORCA_WORKTREE_ID')
+    // Why: the live cwd rides the packed metadata as the trailing field, so
+    // raw-JSON posters attribute rows the same way form posters do (#10572).
+    expect(command).toContain('"$ORCA_AGENT_HOOK_VERSION" "$PWD"')
+    expect(command).toContain('--data-binary @-')
+    expect(command).toContain('Content-Type: application/x-www-form-urlencoded')
+    expect(command).toContain('--data-urlencode "payload@-"')
   })
 })
 

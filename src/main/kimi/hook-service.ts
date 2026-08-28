@@ -24,7 +24,10 @@ import {
   writeManagedScriptRemote,
   writeTextFileRemoteAtomic
 } from '../agent-hooks/installer-utils-remote'
-import { buildPosixHookPayloadCapture } from '../agent-hooks/hook-stdin-contract'
+import {
+  buildPosixHookPayloadCapture,
+  buildPosixHookSpoolLines
+} from '../agent-hooks/hook-stdin-contract'
 import {
   applyManagedKimiHooks,
   KIMI_HOOK_EVENTS,
@@ -71,20 +74,43 @@ function getManagedScript(target: 'local' | 'posix' = 'local'): string {
     '  . "$ORCA_AGENT_HOOK_ENDPOINT" 2>/dev/null || :',
     'fi',
     'if [ -z "$ORCA_AGENT_HOOK_PORT" ] || [ -z "$ORCA_AGENT_HOOK_TOKEN" ] || [ -z "$ORCA_PANE_KEY" ]; then',
+    // Why: the windows-local ordering runs this guard before stdin is read and before
+    // spool_hook_event is defined, so only the payload-first ordering may spool here.
+    ...(windowsLocal ? [] : ['  spool_hook_event']),
     '  exit 0',
     'fi'
   ]
   return [
     '#!/bin/sh',
     ...(windowsLocal
-      ? [...endpointRefreshAndGuard, ...buildPosixHookPayloadCapture()]
-      : [...buildPosixHookPayloadCapture(), ...endpointRefreshAndGuard]),
+      ? [
+          ...endpointRefreshAndGuard,
+          ...buildPosixHookPayloadCapture(),
+          ...buildPosixHookSpoolLines('kimi')
+        ]
+      : [
+          ...buildPosixHookPayloadCapture(),
+          ...buildPosixHookSpoolLines('kimi'),
+          ...endpointRefreshAndGuard
+        ]),
     // Why: worktreeId embeds a filesystem path, so hand-building JSON in POSIX
     // shell is not safe once a path contains quotes or newlines. Post the raw
     // hook payload plus metadata as form fields and let the receiver parse it.
     // Why: pipe payload to curl's stdin (`payload@-`) instead of an inline
     // `payload=$VALUE` arg, so tens-of-KB tool output stays off the curl
     // command line (EDR command-line false positives). Wire body is identical.
+    // Why: under Git Bash $PWD is MSYS form (/c/...), which never matches the
+    // receiver's Windows worktree paths (C:\...); convert the drive-letter form
+    // in pure shell so attribution adds no process per hook event.
+    'hook_cwd=$PWD',
+    'case "${OSTYPE-}" in',
+    '  msys*|cygwin*|win32*)',
+    '    case "$PWD" in',
+    '      /?/*) hook_cwd=${PWD#/}; hook_cwd="${hook_cwd%%/*}:/${hook_cwd#*/}" ;;',
+    '      /?) hook_cwd="${PWD#/}:/" ;;',
+    '    esac',
+    '    ;;',
+    'esac',
     'printf \'%s\' "$payload" | curl -sS -X POST "http://127.0.0.1:${ORCA_AGENT_HOOK_PORT}/hook/kimi" \\',
     '  --connect-timeout 0.5 --max-time 1.5 \\',
     '  -H "Content-Type: application/x-www-form-urlencoded" \\',
@@ -93,10 +119,10 @@ function getManagedScript(target: 'local' | 'posix' = 'local'): string {
     '  --data-urlencode "tabId=${ORCA_TAB_ID}" \\',
     '  --data-urlencode "launchToken=${ORCA_AGENT_LAUNCH_TOKEN}" \\',
     '  --data-urlencode "worktreeId=${ORCA_WORKTREE_ID}" \\',
-    '  --data-urlencode "hookCwd=${PWD}" \\',
+    '  --data-urlencode "hookCwd=${hook_cwd}" \\',
     '  --data-urlencode "env=${ORCA_AGENT_HOOK_ENV}" \\',
     '  --data-urlencode "version=${ORCA_AGENT_HOOK_VERSION}" \\',
-    '  --data-urlencode "payload@-" >/dev/null 2>&1 || true',
+    '  --data-urlencode "payload@-" >/dev/null 2>&1 || spool_hook_event',
     'exit 0',
     ''
   ].join('\n')

@@ -13,6 +13,7 @@ import {
   type Tray,
   session
 } from 'electron'
+import { applyMacPressAndHoldDefaultAtStartup } from './macos-press-and-hold-default'
 import { initTccPromptNotice, stopTccPromptNotice } from './macos-tcc-prompt-notice'
 import { electronApp, is } from '@electron-toolkit/utils'
 import {
@@ -88,10 +89,11 @@ import {
   sweepRestoredSubagentsWithoutLiveAgent
 } from './agent-hooks/restored-subagent-liveness-sweep'
 import {
-  applyAgentStatusHooksEnabled,
+  installManagedAgentHooks,
   isAgentStatusHooksEnabled,
-  removeManagedAgentHooks,
   removeManagedAgentHooksAsync,
+  resolveStartupManagedHookAction,
+  shouldInstallStartupManagedAgentHook,
   shouldContinueManagedHookStartup
 } from './agent-hooks/managed-agent-hook-controls'
 import { initCohortClassifier } from './telemetry/cohort-classifier'
@@ -318,6 +320,11 @@ import { browserCertificateTrustController, browserManager } from './browser/bro
 import { RpcDispatcher } from './runtime/rpc/dispatcher'
 import { OffscreenBrowserBackend } from './browser/offscreen-browser-backend'
 import { initializeBrowserSessionsForApp } from './browser/browser-session-startup'
+import {
+  installDocPreviewProtocolHandler,
+  registerDocPreviewSchemePrivileges
+} from './browser/doc-preview-protocol'
+import { registerDocPreviewGrantHandlers } from './ipc/doc-preview-grant-ipc'
 import { initializeBrowserClientHostId } from './browser/browser-client-host-id'
 import { setUnreadDockBadgeCount } from './dock/unread-badge'
 import { AutomationService } from './automations/service'
@@ -938,6 +945,9 @@ if (hasSingleInstanceLock) {
   installDevParentSignalQuit(shouldCoupleToDevParent)
   // Why: run after configureDevUserDataPath but before app.setName('Orca') (whenReady), which changes the resolved path on case-sensitive filesystems.
   initDataPath()
+  // Why here: initDataPath above gives the canonical userData path for the record file; the write
+  // itself lands for the next launch (see macos-press-and-hold-default.ts).
+  applyMacPressAndHoldDefaultAtStartup(getCanonicalUserDataPath())
   // Why: use the canonical userData path — late app.getPath('userData') can resolve differently across restarts, defeating persistence.
   initSessionParseCachePersistence({
     filePath: join(getCanonicalUserDataPath(), 'ai-vault', 'session-parse-cache.json'),
@@ -958,6 +968,9 @@ if (hasSingleInstanceLock) {
   if (shouldApplyPreReadyAppName(devInstanceIdentity)) {
     app.setName(devInstanceIdentity.appName)
   }
+  // Why: Electron freezes the privileged scheme table at ready, so the doc-preview
+  // scheme must be declared here or its webview loses fetch/secure-origin privileges.
+  registerDocPreviewSchemePrivileges()
   // Why: must precede app.whenReady() so Crashpad is installed before the
   // first renderer spawns; a CHECK before this point is still exit-code-only.
   startCrashpadCapture()
@@ -2433,6 +2446,9 @@ void app.whenReady().then(async () => {
   } catch {
     console.warn('[proxy] Failed to apply network proxy settings')
   }
+  // Why: the preview session is protocol-scoped, so the handler must exist before any preview webview attaches.
+  installDocPreviewProtocolHandler()
+  registerDocPreviewGrantHandlers()
   // Why: browser sessions serve desktop webviews and runtime profile commands, so init at app startup rather than via a renderer IPC path.
   initializeBrowserSessionsForApp({
     orcaProfileId: activeOrcaProfile.profile.id,
@@ -3074,37 +3090,40 @@ void app.whenReady().then(async () => {
   // ordered before managed-hook reconciliation — an incapable host must re-arm
   // and complete the legacy real-home sweep first — but awaiting it inline
   // stalled app init behind that session, so chain instead of blocking.
-  const realHomeCodexHookState = codexRuntimeHome.isHostSystemDefaultRealHomeSelected()
-    ? ensureRealHomeCodexHookState({
-        hooksEnabled: isAgentStatusHooksEnabled(store.getSettings()),
-        userDataPath: app.getPath('userData')
-      }).catch((error: unknown) => {
-        console.warn('[codex-real-home-hooks] startup ensure failed:', error)
-      })
-    : Promise.resolve()
-  if (shouldInstallManagedHooks(is.dev)) {
-    // Why: check the persisted off switch before any auto-install so removed hooks don't silently reappear on launch.
-    if (isAgentStatusHooksEnabled(store.getSettings())) {
-      const managedHookStore = store
-      void realHomeCodexHookState
-        .then(() =>
-          applyAgentStatusHooksEnabled(true, managedHookStore.getSettings(), {
-            shouldHydrateShellPath: app.isPackaged,
-            onInstallError: recordManagedHookInstallFailure,
-            shouldContinue: (agent) => {
-              const settings = managedHookStore.getSettings()
-              return shouldContinueManagedHookStartup(isQuitting, settings, agent)
-            }
-          })
-        )
-        .catch((error: unknown) => {
-          console.warn('[agent-hooks] failed to reconcile managed hooks on startup:', error)
+  const startupManagedHookSettings = store.getSettings()
+  const shouldReconcileStartupManagedHooks =
+    shouldInstallManagedHooks(is.dev) &&
+    resolveStartupManagedHookAction(startupManagedHookSettings) === 'install'
+  const realHomeCodexHookState =
+    shouldReconcileStartupManagedHooks &&
+    shouldInstallStartupManagedAgentHook(startupManagedHookSettings, 'codex') &&
+    codexRuntimeHome.isHostSystemDefaultRealHomeSelected()
+      ? ensureRealHomeCodexHookState({
+          hooksEnabled: true,
+          userDataPath: app.getPath('userData')
+        }).catch((error: unknown) => {
+          console.warn('[codex-real-home-hooks] startup ensure failed:', error)
         })
-    } else {
-      void removeManagedAgentHooks().catch((error: unknown) => {
-        console.warn('[agent-hooks] failed to remove managed hooks on startup:', error)
+      : Promise.resolve()
+  // Why skip rather than remove when the off switch is set: the hook files are user-global but this
+  // decision reads only THIS profile's settings, so removing here deletes the hooks every other Orca
+  // instance depends on (STA-5679). Skipping already keeps removed hooks from reappearing on launch.
+  if (shouldReconcileStartupManagedHooks) {
+    const managedHookStore = store
+    void realHomeCodexHookState
+      .then(() =>
+        installManagedAgentHooks(managedHookStore.getSettings(), {
+          shouldHydrateShellPath: app.isPackaged,
+          onInstallError: recordManagedHookInstallFailure,
+          shouldContinue: (agent) => {
+            const settings = managedHookStore.getSettings()
+            return shouldContinueManagedHookStartup(isQuitting, settings, agent)
+          }
+        })
+      )
+      .catch((error: unknown) => {
+        console.warn('[agent-hooks] failed to reconcile managed hooks on startup:', error)
       })
-    }
   }
   // Why: process-gone metrics only see survivors; retain a recent whole-app
   // snapshot for comparison in crash reports.
