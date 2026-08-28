@@ -901,7 +901,7 @@ describe('buildPosixAgentHookPostCommand', () => {
     expect(command).toContain('Content-Type: application/json')
     expect(command).toContain('X-Orca-Agent-Hook-Meta-Encoding: base64')
     expect(command).toContain('X-Orca-Agent-Hook-Meta: ${orca_hook_metadata}')
-    expect(command).toContain("printf '%s\\037%s\\037%s\\037%s\\037%s\\037%s\\037%s\\037%s'")
+    expect(command).toContain("printf '%s\\037%s\\037%s\\037%s\\037%s\\037%s\\037%s'")
     expect(command).toContain('$ORCA_PANE_KEY')
     expect(command).toContain('$ORCA_WORKTREE_ID')
     // Why: the live cwd rides the packed metadata as the trailing field, so
